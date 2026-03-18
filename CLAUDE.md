@@ -32,6 +32,19 @@ src/
 │   ├── MessageBridge.ts     # RN ↔ WebView communication bridge with bridge injection script
 │   ├── CookieManager.ts     # Cookie storage, domain filtering, persistence
 │   └── index.ts             # Public API re-exports
+├── adapters/                # Bank adapter framework (CDT-7)
+│   ├── types.ts             # BankAdapterConfig, selectors, extractors, MFA detector types
+│   ├── registry.ts          # BankAdapterRegistry — lookup by bankId, search, list
+│   ├── validation.ts        # Adapter config validation with detailed error reporting
+│   ├── banks/               # Built-in bank adapter configurations
+│   │   ├── chase.ts         # Chase adapter (CSS selectors, extractors, MFA detection)
+│   │   ├── bank-of-america.ts # Bank of America adapter
+│   │   ├── wells-fargo.ts   # Wells Fargo adapter
+│   │   └── index.ts         # Re-exports all bank adapters
+│   └── index.ts             # Public API re-exports
+├── ui/                      # Headless UI components
+│   ├── BankSelector.ts      # Bank selection controller (searchable list with logos)
+│   └── index.ts             # Public API re-exports
 ├── types/                   # Shared type definitions
 │   ├── navigation.ts        # Navigation state machine (discriminated union, transitions)
 │   ├── bridge.ts            # WebView message types (inbound/outbound), WebViewRef, CookieData
@@ -39,6 +52,13 @@ src/
 └── index.ts                 # SDK entry point
 
 tests/
+├── adapters/
+│   ├── types.test.ts              # Adapter type compilation and value tests
+│   ├── validation.test.ts         # Validation logic tests (150 cases)
+│   ├── registry.test.ts           # Registry CRUD, search, default registry
+│   └── banks.test.ts              # Built-in adapter validation and structure tests
+├── ui/
+│   └── BankSelector.test.ts       # Bank selector controller tests
 ├── auth/
 │   ├── types.test.ts              # Validation and error type tests
 │   ├── auth-state-machine.test.ts # State machine transition tests
@@ -73,6 +93,24 @@ idle → navigating → loaded → extracting → complete → idle
        complete → navigating (re-navigate)
        error → navigating (retry)
 ```
+
+### Bank Adapter Framework
+Each bank has unique login pages, MFA flows, and data layouts. The adapter framework encapsulates all bank-specific details:
+- **`BankAdapterConfig`** — Complete bank-specific configuration (selectors, extractors, MFA detection)
+- **`BankAdapterRegistry`** — Central lookup; validates adapters at registration time, rejects duplicates
+- **`BankSelectorController`** — Headless UI controller for bank selection (searchable, subscribe/unsubscribe pattern)
+- **Validation-at-registration** — Every adapter is validated before it can be added to the registry
+- **Discriminated unions** for `ExtractionStrategy` (`textContent | innerText | attribute | value | regex`)
+- **`as const` adapter configs** for maximum type safety in built-in banks
+
+### Adding a New Bank Adapter
+1. Create `src/adapters/banks/<bank-name>.ts` exporting a `BankAdapterConfig`
+2. Define login selectors (username, password, submit — all required)
+3. Add MFA detection rules (at least one required)
+4. Optionally add account/transaction extractors
+5. Re-export from `src/adapters/banks/index.ts`
+6. Register in `createDefaultRegistry()` in `src/adapters/registry.ts`
+7. Run `npm test` to verify validation passes
 
 ### Browser Driver Interface
 The auth module depends on the `BrowserDriver` interface (port/adapter pattern). Concrete implementations (Puppeteer, Playwright, Expo WebView) implement this interface. Tests use mock drivers.
@@ -116,3 +154,14 @@ None required for the SDK itself. Browser driver implementations may need enviro
 11. DOM extraction and JS injection require page to be in `loaded` state — enforced by precondition checks
 12. `dispose()` cancels all pending requests and clears all handlers
 13. Expired cookies are automatically pruned on access — never returned to callers
+
+### Bank Adapter Framework
+14. No two adapters may share the same bankId — enforced at registration time
+15. All registered adapters must pass validation — enforced at registration time
+16. Lookup by bankId returns `undefined` (not an error) for unknown banks
+17. Search results are sorted alphabetically by bank name
+18. Every adapter must define login selectors — cannot create an adapter without them
+19. MFA detector must define at least one detection rule
+20. bankId must match pattern `/^[a-z][a-z0-9_]{0,49}$/` — lowercase, underscores, max 50 chars
+21. BankSelectorController selection auto-clears when filtered bank is no longer visible
+22. `dispose()` removes all subscribers — no leaked listeners
