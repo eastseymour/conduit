@@ -24,6 +24,15 @@ Plaid competitor — an Expo SDK that runs an embedded browser to log into banki
 - **State events** — Emit typed events throughout: `logging_in`, `mfa_required`, `mfa_submitting`, `authenticated`, `auth_failed`
 - **Safety** — Timeout protection, max MFA retry limits, automatic browser cleanup
 
+### Bank Adapter Framework (CDT-7)
+- **Pluggable per-bank scripts** — Each bank defines its own CSS selectors, data extractors, and MFA detection rules
+- **3 built-in adapters** — Chase, Bank of America, Wells Fargo with full login, MFA, account, and transaction selectors
+- **Adapter registry** — Central lookup by `bankId` with search, filtering, and validation at registration time
+- **Bank selection UI** — Headless `BankSelectorController` with search, subscribe/unsubscribe, and auto-managed selection state
+- **Validation utilities** — `validateBankAdapterConfig()` with detailed error/warning reporting for custom adapters
+- **Type-safe extraction** — Discriminated union `ExtractionStrategy` (textContent, innerText, attribute, value, regex)
+- **MFA detection** — Priority-ordered detection rules mapping CSS selectors to MFA challenge types
+
 ## Setup
 
 ```bash
@@ -163,6 +172,113 @@ switch (result.status) {
 }
 ```
 
+### Bank Adapter Framework
+
+```typescript
+import {
+  BankAdapterRegistry,
+  createDefaultRegistry,
+  BankSelectorController,
+  validateBankAdapterConfig,
+} from '@conduit/sdk';
+
+// 1. Use the built-in registry with Chase, BofA, and Wells Fargo
+const registry = createDefaultRegistry();
+
+// 2. Look up a bank adapter by ID
+const chaseAdapter = registry.get('chase');
+console.log(chaseAdapter?.loginUrl); // https://secure.chase.com/...
+
+// 3. Search for banks
+const results = registry.search({ query: 'chase' });
+console.log(results[0]?.name); // "Chase"
+
+// 4. Filter by capabilities
+const withTransactions = registry.search({ requireTransactions: true });
+
+// 5. Use the bank selector controller for UI
+const selector = new BankSelectorController(registry);
+
+// Subscribe to state changes
+const unsubscribe = selector.subscribe((state) => {
+  console.log('Filtered banks:', state.filteredBanks.length);
+  console.log('Selected:', state.selectedBank?.name);
+});
+
+// Search and select
+selector.setQuery('chase');
+selector.select('chase');
+
+// Cleanup
+unsubscribe();
+selector.dispose();
+```
+
+### Adding a Custom Bank Adapter
+
+```typescript
+import {
+  BankAdapterRegistry,
+  validateBankAdapterConfig,
+  type BankAdapterConfig,
+} from '@conduit/sdk';
+
+const myBankAdapter: BankAdapterConfig = {
+  bankId: 'my_bank',
+  name: 'My Bank',
+  loginUrl: 'https://www.mybank.com/login',
+  logoUrl: 'https://www.mybank.com/logo.png',
+  selectors: {
+    login: {
+      usernameInput: '#username',
+      passwordInput: '#password',
+      submitButton: '#login-btn',
+    },
+    mfa: {
+      codeInput: '#mfa-code',
+      submitButton: '#mfa-submit',
+    },
+  },
+  extractors: {
+    accounts: {
+      readySelector: '.accounts-list',
+      fields: [
+        {
+          fieldName: 'accountName',
+          selector: '.account-name',
+          strategy: { type: 'textContent' },
+          required: true,
+        },
+        {
+          fieldName: 'balance',
+          selector: '.account-balance',
+          strategy: { type: 'textContent' },
+          transform: 'parseAmount',
+          required: true,
+        },
+      ],
+    },
+  },
+  mfaDetector: {
+    rules: [
+      { selector: '#mfa-code', challengeType: 'sms_code' },
+    ],
+    successIndicator: '.dashboard-welcome',
+    failureIndicator: '.login-error',
+  },
+};
+
+// Validate before registering
+const result = validateBankAdapterConfig(myBankAdapter);
+if (!result.valid) {
+  console.error('Validation errors:', result.errors);
+}
+
+// Register
+const registry = new BankAdapterRegistry();
+registry.register(myBankAdapter);
+```
+
 ## Architecture
 
 The SDK follows a **port/adapter pattern**:
@@ -170,6 +286,8 @@ The SDK follows a **port/adapter pattern**:
 - **Browser Engine** (`src/core/`) — Embedded WebView engine with MessageBridge communication layer
 - **Auth Module** (`src/auth/`) — Core authentication logic with state machine
 - **Browser Interface** (`src/browser/`) — Abstract `BrowserDriver` interface
+- **Bank Adapters** (`src/adapters/`) — Pluggable per-bank scripts with CSS selectors, extractors, and MFA detection
+- **Bank Selection UI** (`src/ui/`) — Headless controller for bank search and selection
 - **Shared Types** (`src/types/`) — Navigation state machine, message types, WebView ref types
 
 ### Navigation State Machine
