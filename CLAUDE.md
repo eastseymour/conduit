@@ -44,7 +44,15 @@ src/
 │   ├── bridge.ts            # WebView message types (inbound/outbound), WebViewRef, CookieData
 │   └── index.ts             # Barrel export
 ├── ui/                      # Preview UI components (browser preview, status captions)
-│   └── .gitkeep
+│   ├── ConduitPreview.ts    # React component factory for bank browser preview
+│   ├── types.ts             # UI component types (ConduitPreviewProps, PreviewRenderInfo)
+│   ├── preview/             # Visual browser preview module (CDT-4)
+│   │   ├── types.ts         # Preview types: dimensions, positions, transitions, masking config
+│   │   ├── browser-preview-controller.ts  # Headless controller orchestrating preview state
+│   │   ├── sensitive-field-masker.ts      # JS injection for blurring sensitive fields
+│   │   ├── transition-state-machine.ts    # Page transition animation state machine
+│   │   └── index.ts         # Barrel exports
+│   └── index.ts             # UI module barrel exports
 └── index.ts                 # SDK entry point
 
 tests/
@@ -53,6 +61,12 @@ tests/
 │   ├── auth-state-machine.test.ts # State machine transition tests
 │   ├── auth-module.test.ts        # Integration tests with mock browser
 │   └── mfa-handler.test.ts        # MFA flow tests
+├── ui/
+│   └── preview/
+│       ├── types.test.ts                      # Preview types, factories, validation tests
+│       ├── browser-preview-controller.test.ts # Controller lifecycle, events, render info tests
+│       ├── sensitive-field-masker.test.ts      # Script generation and result parsing tests
+│       └── transition-state-machine.test.ts   # Transition state machine lifecycle tests
 ├── conduit-types.test.ts          # Account, Transaction, BankAdapter, Config, LinkSession tests
 ├── navigation.test.ts             # Navigation state machine transition tests
 ├── MessageBridge.test.ts          # Bridge communication tests
@@ -99,6 +113,32 @@ created → institution_selected → authenticating → extracting → succeeded
                                                ↘ failed
           Any active state → cancelled
 ```
+
+### Visual Browser Preview (CDT-4)
+
+The preview system renders a miniaturized view of the WebView during bank automation. It uses a **headless controller pattern** — `BrowserPreviewController` manages all state and emits events, while rendering is delegated to the host app's UI layer (React Native, web, etc.).
+
+Key components:
+- **BrowserPreviewController** — orchestrates expand/collapse, visibility, position, page transitions, and sensitive field masking. Attaches to `BrowserEngine` for navigation events.
+- **TransitionStateMachine** — `idle → transitioning → complete → idle` for page transition animations with configurable duration and type (fade, slide_left, none).
+- **Sensitive Field Masker** — generates self-contained IIFE scripts injected into WebView to blur sensitive fields (passwords, SSNs, credit cards) via CSS `filter: blur()`. Masking is idempotent (element marking with data attributes, style element ID check).
+- **Dimension system** — discriminated union: `{ type: 'pixels', value: number }` or `{ type: 'percentage', value: number }` with `resolveDimension(dim, containerSize)` resolver.
+- **ScriptInjector** interface — test seam for masking without a real WebView.
+
+### Transition State Machine
+```
+idle → transitioning → complete → idle
+       (start)          (tick→1.0)  (reset)
+```
+- Zero-duration or `TransitionType.None` transitions complete instantly
+- `tickByTime(currentTime)` calculates progress from elapsed/duration ratio
+- Starting a new transition while transitioning force-completes the current one
+
+### Sensitive Field Masking
+- `generateMaskingScript(config)` builds a JS IIFE that creates a `<style>` element with blur CSS, queries elements matching selectors, applies MASK_CLASS
+- `generateUnmaskingScript()` removes all masks and the style element
+- Scripts return JSON results parsed by `parseMaskingResult()`
+- Default rules cover: password inputs, hidden inputs, credit card numbers, CVV/CVC, SSN fields, social security, PIN inputs, `[data-sensitive]` elements
 
 ### Browser Driver Interface
 The auth module depends on the `BrowserDriver` interface (port/adapter pattern). Concrete implementations (Puppeteer, Playwright, Expo WebView) implement this interface. Tests use mock drivers.
@@ -157,3 +197,16 @@ None required for the SDK itself. Browser driver implementations may need enviro
 17. DOM extraction and JS injection require page to be in `loaded` state — enforced by precondition checks
 18. `dispose()` cancels all pending requests and clears all handlers
 19. Expired cookies are automatically pruned on access — never returned to callers
+
+### Visual Browser Preview
+20. `BrowserPreviewController` must be disposed before the engine it's attached to — `dispose()` detaches automatically
+21. Transition state follows `idle → transitioning → complete → idle` — enforced via `assertValidTransitionPhaseChange()`
+22. Starting a new transition while already transitioning force-completes the previous transition first
+23. Zero-duration or `TransitionType.None` transitions complete instantly (no transitioning state)
+24. Sensitive field masking is idempotent — elements are marked with `PROCESSED_ATTR`, style element checked by ID
+25. `resolveDimension()` for percentage type returns `Math.round(value / 100 * containerSize)`
+26. Negative blur radius is clamped to 0
+27. Empty or whitespace-only selectors are filtered out before script generation
+28. `parseMaskingResult()` never throws — always returns a valid `SensitiveFieldMaskResult`
+29. `BrowserPreviewConfig` validation requires: width/height > 0, blurRadius ≥ 0, transitionDuration ≥ 0, at least one field rule
+30. Events are emitted synchronously — listeners execute in registration order
