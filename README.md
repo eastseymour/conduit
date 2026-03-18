@@ -4,6 +4,13 @@ Plaid competitor — an Expo SDK that runs an embedded browser to log into banki
 
 ## Features
 
+### Core SDK Types
+- **Account** — bank account model with balance, type classification, masked account/routing numbers
+- **Transaction** — financial transaction with signed amounts, categories, pending/posted status
+- **BankAdapter** — interface for per-bank automation (authenticate, extract accounts & transactions)
+- **ConduitConfig** — SDK configuration with runtime validation
+- **LinkSession** — discriminated union tracking user-facing link flow lifecycle
+
 ### Embedded Browser Engine (CDT-2)
 - **WebView integration** — `BrowserEngine` wraps react-native-webview for headless-like browser automation
 - **Navigation state machine** — Type-safe state flow: `idle → navigating → loaded → extracting → complete`
@@ -12,188 +19,119 @@ Plaid competitor — an Expo SDK that runs an embedded browser to log into banki
 - **JavaScript injection** — Execute arbitrary scripts and eval expressions in the WebView context
 - **Wait utilities** — `waitForElement()`, `waitForNavigation()`, `waitForPageReady()` with configurable timeouts
 - **Cookie management** — In-memory cookie store with domain filtering, expiration pruning, and pluggable persistence
-- **Error handling** — Typed errors for timeouts, SSL failures, load errors, network errors
-- **Redirect tracking** — Full redirect chain captured during navigation
 
 ### Bank Authentication (CDT-3)
 - **Credential submission** — Accept username/password via SDK API, navigate to bank login, fill & submit
 - **MFA handling** — Detect and handle SMS codes, email codes, security questions, and push notifications
 - **Host app integration** — Surface MFA prompts via callbacks/events, accept MFA input from host app
 - **Login outcome detection** — Distinguish between successful login, failed login, and account locked
-- **Session persistence** — Handle "remember this device" prompts
-- **State events** — Emit typed events throughout: `logging_in`, `mfa_required`, `mfa_submitting`, `authenticated`, `auth_failed`
-- **Safety** — Timeout protection, max MFA retry limits, automatic browser cleanup
 
 ## Setup
 
 ```bash
-# Install dependencies
-npm install
-
-# Build
-npm run build
-
-# Run tests
-npm test
-
-# Type-check
-npm run lint
+npm install           # Install dependencies
+npm run build         # Build TypeScript to dist/
+npm test              # Run all tests
+npm run typecheck     # Type-check without emitting
+npm run lint          # Lint with ESLint
+npm run format        # Format with Prettier
 ```
+
+## SDK Installation (for consumers)
+
+```bash
+npm install @conduit/sdk
+```
+
+### Peer Dependencies
+
+- `react` >= 18.0.0
+- `react-native` >= 0.72.0
+- `react-native-webview` >= 13.0.0
+- `expo` >= 49.0.0 (optional)
 
 ## Usage
 
-### Browser Engine
+### SDK Configuration
 
 ```typescript
-import { BrowserEngine } from '@conduit/sdk';
+import { assertValidConfig, type ConduitConfig } from '@conduit/sdk';
 
-// 1. Create and configure the engine
-const engine = new BrowserEngine({
-  defaultTimeoutMs: 30_000,
-  jsTimeoutMs: 10_000,
-  elementWaitTimeoutMs: 15_000,
-  debug: false,
-});
-
-// 2. Connect the WebView ref (from react-native-webview)
-engine.setWebViewRef(webViewRef);
-
-// 3. Listen for events
-engine.on((event) => {
-  if (event.type === 'stateChange') {
-    console.log(`Navigation: ${event.state.phase}`);
-  }
-});
-
-// 4. Navigate and extract data
-const navResult = await engine.navigate('https://bank.example.com/login');
-if (navResult.success) {
-  // Wait for the login form to appear
-  const found = await engine.waitForElement('#login-form');
-  if (found) {
-    // Inject JavaScript to fill and submit the form
-    await engine.injectJavaScript(`
-      document.querySelector('#username').value = 'user';
-      document.querySelector('#password').value = 'pass';
-      document.querySelector('#login-form').submit();
-    `);
-
-    // Wait for navigation to complete
-    await engine.waitForNavigation();
-
-    // Extract the page DOM
-    const dom = await engine.extractDOM();
-    console.log(dom.html);
-  }
-}
-
-// 5. Cleanup
-engine.dispose();
-```
-
-### Auth Module
-
-```typescript
-import { AuthModule } from '@conduit/sdk';
-import type { BrowserDriver } from '@conduit/sdk';
-
-// 1. Create an auth module with options
-const auth = new AuthModule({
-  maxMfaRetries: 3,
-  rememberDevice: true,
-  timeoutMs: 120_000,
+const config: ConduitConfig = {
+  clientId: 'your_client_id',
+  environment: 'sandbox',
+  logLevel: 'info',
+  navigationTimeoutMs: 30_000,
   mfaTimeoutMs: 300_000,
-});
-
-// 2. Implement the BrowserDriver interface for your platform
-const browserDriver: BrowserDriver = {
-  async navigateToLogin(bankId) { /* ... */ },
-  async submitCredentials(credentials) { /* ... */ },
-  async submitMfaResponse(response) { /* ... */ },
-  async handleRememberDevice(remember) { /* ... */ },
-  async cleanup() { /* ... */ },
+  showPreview: true,
 };
 
-// 3. Start authentication with callbacks
-const result = await auth.authenticate(
-  'chase',                               // bank ID
-  { username: 'user', password: 'pass' }, // credentials
-  browserDriver,                          // browser driver
-  {
-    onStateChange(event) {
-      console.log(`Auth state: ${event.type}`);
-      // event.type is one of: 'idle' | 'logging_in' | 'mfa_required' |
-      //                       'mfa_submitting' | 'authenticated' | 'auth_failed'
-    },
+assertValidConfig(config); // Throws if invalid
+```
 
-    async onMfaRequired(challenge) {
-      // Surface the MFA challenge to your UI
-      // challenge.type is one of: 'sms_code' | 'email_code' |
-      //                           'security_questions' | 'push_notification'
+### Working with Accounts & Transactions
 
-      if (challenge.type === 'sms_code') {
-        const code = await promptUserForCode(challenge.maskedPhoneNumber);
-        return {
-          challengeId: challenge.challengeId,
-          type: 'sms_code',
-          code,
-        };
-      }
+```typescript
+import type { Account, Transaction, BankAdapter } from '@conduit/sdk';
+import { AccountType, TransactionStatus } from '@conduit/sdk';
 
-      // Return null to cancel MFA
-      return null;
-    },
-  },
-);
-
-// 4. Handle the result
-switch (result.status) {
-  case 'success':
-    console.log('Authenticated!', result.sessionToken);
-    break;
-  case 'failed':
-    console.log('Login failed:', result.reason);
-    break;
-  case 'locked':
-    console.log('Account locked:', result.reason);
-    if (result.retryAfter) {
-      console.log('Retry after:', result.retryAfter);
+const adapter: BankAdapter = getBankAdapter('chase');
+const authenticated = await adapter.authenticate();
+if (authenticated) {
+  const accounts = await adapter.getAccounts();
+  for (const account of accounts) {
+    if (account.type === AccountType.Checking) {
+      const txns = await adapter.getTransactions(account.id, '2024-01-01', '2024-01-31');
+      const pending = txns.filter(t => t.status === TransactionStatus.Pending);
     }
-    break;
+  }
+  await adapter.cleanup();
+}
+```
+
+### Link Session Flow
+
+```typescript
+import { LinkSessionPhase, type LinkSession } from '@conduit/sdk';
+
+function handleSessionUpdate(session: LinkSession) {
+  switch (session.phase) {
+    case 'created':       showInstitutionPicker(); break;
+    case 'authenticating': showLoadingSpinner(); break;
+    case 'mfa_required':  showMfaPrompt(session.mfaChallengeType); break;
+    case 'extracting':    showProgress(session.progress); break;
+    case 'succeeded':     showAccounts(session.accounts); break;
+    case 'failed':        showError(session.error.message); break;
+    case 'cancelled':     navigateBack(); break;
+  }
 }
 ```
 
 ## Architecture
 
-The SDK follows a **port/adapter pattern**:
-
-- **Browser Engine** (`src/core/`) — Embedded WebView engine with MessageBridge communication layer
-- **Auth Module** (`src/auth/`) — Core authentication logic with state machine
-- **Browser Interface** (`src/browser/`) — Abstract `BrowserDriver` interface
-- **Shared Types** (`src/types/`) — Navigation state machine, message types, WebView ref types
-
-### Navigation State Machine
-
 ```
-idle → navigating → loaded → extracting → complete → idle
-                  ↘ error ↗            ↘ error ↗
+src/
+├── adapters/    # Bank-specific automation implementations
+├── auth/        # Authentication logic with state machine
+├── browser/     # Abstract BrowserDriver interface
+├── core/        # Embedded WebView engine + MessageBridge
+├── types/       # Core domain types (Account, Transaction, BankAdapter, Config, LinkSession)
+└── ui/          # Preview UI components
 ```
 
-### Auth State Machine
+### State Machines
 
-```
-idle → logging_in → mfa_required → mfa_submitting → authenticated
-                  ↘ authenticated                  ↗ mfa_required (retry)
-                  ↘ auth_failed                    ↘ auth_failed
-```
+- **Navigation:** `idle → navigating → loaded → extracting → complete`
+- **Auth:** `idle → logging_in → [mfa_required → mfa_submitting →] authenticated | auth_failed`
+- **Link Session:** `created → institution_selected → authenticating → extracting → succeeded | failed | cancelled`
 
 ### Design Philosophy
 
 Built with **Correctness by Construction** principles:
 - Discriminated unions make illegal states unrepresentable
-- State machine enforces valid transitions at runtime
+- State machines enforce valid transitions at runtime
 - Precondition assertions catch errors early
-- Typed error codes enable precise error handling
+- `as const` enum patterns provide both runtime values and type safety
 
 ## License
 
