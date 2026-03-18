@@ -26,6 +26,16 @@ Plaid competitor — an Expo SDK that runs an embedded browser to log into banki
 - **Host app integration** — Surface MFA prompts via callbacks/events, accept MFA input from host app
 - **Login outcome detection** — Distinguish between successful login, failed login, and account locked
 
+### Visual Browser Preview (CDT-4)
+- **Live browser preview** — Minimized real-time view of the bank browser as navigation happens
+- **Configurable container** — Pixel-based (e.g., 300x200) or percentage-based sizing
+- **Expand/collapse toggle** — Switch between thumbnail and full view
+- **Page transition animations** — Smooth fade or slide animations between pages, with configurable duration
+- **Sensitive field masking** — Automatically blurs password inputs, credit card fields, SSN fields, and PINs
+- **Configurable position** — Render as bottom sheet, inline component, or modal overlay
+- **Scale factor** — Smooth thumbnail scaling of the full page into the mini view
+- **Headless controller** — Framework-agnostic controller with pure render logic
+
 ## Setup
 
 ```bash
@@ -107,6 +117,44 @@ function handleSessionUpdate(session: LinkSession) {
 }
 ```
 
+### Browser Preview
+
+```typescript
+import {
+  BrowserPreviewController,
+  computeBrowserPreviewRenderInfo,
+  PreviewPosition,
+  TransitionType,
+} from '@conduit/sdk';
+
+// 1. Create the preview controller
+const preview = new BrowserPreviewController({
+  position: PreviewPosition.BottomSheet,
+  transitionType: TransitionType.Fade,
+  transitionDurationMs: 300,
+  scaleFactor: 0.5,
+});
+
+// 2. Attach the BrowserEngine for real-time navigation events
+preview.attachEngine(browserEngine);
+
+// 3. Subscribe to state changes for your UI
+preview.on((event) => {
+  if (event.type === 'state_change') {
+    const renderInfo = computeBrowserPreviewRenderInfo(event.state);
+    // renderInfo has: showWebView, containerWidth, containerHeight,
+    //                 opacity, webViewScale, showLoadingOverlay, etc.
+    updateUI(renderInfo);
+  }
+});
+
+// 4. Toggle expand/collapse
+preview.toggle();
+
+// 5. Cleanup
+preview.dispose();
+```
+
 ## Architecture
 
 ```
@@ -117,6 +165,7 @@ src/
 ├── core/        # Embedded WebView engine + MessageBridge
 ├── types/       # Core domain types (Account, Transaction, BankAdapter, Config, LinkSession)
 └── ui/          # Preview UI components
+    └── preview/ # Visual browser preview (CDT-4): controller, transitions, masking
 ```
 
 ### State Machines
@@ -124,6 +173,7 @@ src/
 - **Navigation:** `idle → navigating → loaded → extracting → complete`
 - **Auth:** `idle → logging_in → [mfa_required → mfa_submitting →] authenticated | auth_failed`
 - **Link Session:** `created → institution_selected → authenticating → extracting → succeeded | failed | cancelled`
+- **Page Transition:** `idle → transitioning → complete → idle`
 
 ### Design Philosophy
 
