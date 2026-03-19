@@ -35,9 +35,7 @@ export function computePreviewRenderInfo(
 ): PreviewRenderInfo {
   const caption = showCaption ? state.caption : '';
   const progressPercent =
-    showProgress && state.progress !== null
-      ? Math.round(state.progress * 100)
-      : null;
+    showProgress && state.progress !== null ? Math.round(state.progress * 100) : null;
 
   const statusAccessibilityMap: Record<PreviewStatusName, string> = {
     idle: 'Bank connection preview, idle',

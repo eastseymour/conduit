@@ -35,8 +35,7 @@ export const PreviewPosition = {
   Modal: 'modal',
 } as const;
 
-export type PreviewPositionName =
-  (typeof PreviewPosition)[keyof typeof PreviewPosition];
+export type PreviewPositionName = (typeof PreviewPosition)[keyof typeof PreviewPosition];
 
 // ─── Preview Display Mode ────────────────────────────────────────────
 
@@ -48,8 +47,7 @@ export const PreviewDisplayMode = {
   Expanded: 'expanded',
 } as const;
 
-export type PreviewDisplayModeName =
-  (typeof PreviewDisplayMode)[keyof typeof PreviewDisplayMode];
+export type PreviewDisplayModeName = (typeof PreviewDisplayMode)[keyof typeof PreviewDisplayMode];
 
 // ─── Preview Size ────────────────────────────────────────────────────
 
@@ -85,8 +83,7 @@ export const TransitionType = {
   None: 'none',
 } as const;
 
-export type TransitionTypeName =
-  (typeof TransitionType)[keyof typeof TransitionType];
+export type TransitionTypeName = (typeof TransitionType)[keyof typeof TransitionType];
 
 /**
  * Phase of a page transition animation.
@@ -99,20 +96,17 @@ export const TransitionPhase = {
   Complete: 'complete',
 } as const;
 
-export type TransitionPhaseName =
-  (typeof TransitionPhase)[keyof typeof TransitionPhase];
+export type TransitionPhaseName = (typeof TransitionPhase)[keyof typeof TransitionPhase];
 
 /**
  * Valid transition phase changes.
  */
-const VALID_TRANSITION_PHASE_CHANGES: Record<
-  TransitionPhaseName,
-  readonly TransitionPhaseName[]
-> = {
-  [TransitionPhase.Idle]: [TransitionPhase.Transitioning],
-  [TransitionPhase.Transitioning]: [TransitionPhase.Complete],
-  [TransitionPhase.Complete]: [TransitionPhase.Idle],
-} as const;
+const VALID_TRANSITION_PHASE_CHANGES: Record<TransitionPhaseName, readonly TransitionPhaseName[]> =
+  {
+    [TransitionPhase.Idle]: [TransitionPhase.Transitioning],
+    [TransitionPhase.Transitioning]: [TransitionPhase.Complete],
+    [TransitionPhase.Complete]: [TransitionPhase.Idle],
+  } as const;
 
 /**
  * Check if a transition phase change is valid.
@@ -355,20 +349,14 @@ export function percentage(value: number): PreviewDimension {
 /**
  * Create a PreviewSize from width and height dimensions.
  */
-export function createPreviewSize(
-  width: PreviewDimension,
-  height: PreviewDimension,
-): PreviewSize {
+export function createPreviewSize(width: PreviewDimension, height: PreviewDimension): PreviewSize {
   return { width, height };
 }
 
 /**
  * Resolve a dimension to a pixel value given a parent size.
  */
-export function resolveDimension(
-  dimension: PreviewDimension,
-  parentSize: number,
-): number {
+export function resolveDimension(dimension: PreviewDimension, parentSize: number): number {
   switch (dimension.type) {
     case 'pixels':
       return dimension.value;
@@ -425,9 +413,10 @@ export const DEFAULT_BROWSER_PREVIEW_CONFIG: Readonly<BrowserPreviewConfig> = {
 /**
  * Validate a browser preview configuration.
  */
-export function validateBrowserPreviewConfig(
-  config: BrowserPreviewConfig,
-): { valid: boolean; errors: readonly string[] } {
+export function validateBrowserPreviewConfig(config: BrowserPreviewConfig): {
+  valid: boolean;
+  errors: readonly string[];
+} {
   const errors: string[] = [];
 
   if (config.collapsedSize.width.value <= 0) {
@@ -448,10 +437,7 @@ export function validateBrowserPreviewConfig(
   if (config.scaleFactor <= 0 || config.scaleFactor > 1) {
     errors.push('scaleFactor must be in (0.0, 1.0]');
   }
-  if (
-    config.sensitiveFieldConfig.enabled &&
-    config.sensitiveFieldConfig.rules.length === 0
-  ) {
+  if (config.sensitiveFieldConfig.enabled && config.sensitiveFieldConfig.rules.length === 0) {
     errors.push('sensitiveFieldConfig.rules must contain at least one rule when enabled');
   }
   if (config.sensitiveFieldConfig.blurRadius < 0) {
@@ -475,14 +461,10 @@ export function validateBrowserPreviewConfig(
 /**
  * Assert a browser preview config is valid.
  */
-export function assertValidBrowserPreviewConfig(
-  config: BrowserPreviewConfig,
-): void {
+export function assertValidBrowserPreviewConfig(config: BrowserPreviewConfig): void {
   const result = validateBrowserPreviewConfig(config);
   if (!result.valid) {
-    throw new Error(
-      `Invalid BrowserPreviewConfig: ${result.errors.join('; ')}`,
-    );
+    throw new Error(`Invalid BrowserPreviewConfig: ${result.errors.join('; ')}`);
   }
 }
 

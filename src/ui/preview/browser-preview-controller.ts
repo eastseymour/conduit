@@ -114,10 +114,8 @@ export class BrowserPreviewController {
       transition: createTransitionIdleState(),
       sensitiveFieldMask: null,
       isLoading: false,
-      canExpand:
-        this._config.initialDisplayMode === PreviewDisplayMode.Collapsed,
-      canCollapse:
-        this._config.initialDisplayMode === PreviewDisplayMode.Expanded,
+      canExpand: this._config.initialDisplayMode === PreviewDisplayMode.Collapsed,
+      canCollapse: this._config.initialDisplayMode === PreviewDisplayMode.Expanded,
       scaleFactor: this._config.scaleFactor,
     };
   }
@@ -169,9 +167,7 @@ export class BrowserPreviewController {
     this.detachEngine();
     this._browserEngine = engine;
     this._scriptInjector = engine;
-    this._engineUnsubscribe = engine.on(
-      this._handleEngineEvent.bind(this),
-    );
+    this._engineUnsubscribe = engine.on(this._handleEngineEvent.bind(this));
   }
 
   /**
@@ -498,7 +494,7 @@ export class BrowserPreviewController {
   /**
    * Update the sensitive field masking configuration.
    */
-  updateSensitiveFieldConfig(config: Partial<SensitiveFieldConfig>): void {
+  updateSensitiveFieldConfig(_config: Partial<SensitiveFieldConfig>): void {
     this.assertNotDisposed();
     // Config is immutable at construction, but we can trigger re-masking
     // with the existing config. For full config updates, create a new controller.
@@ -620,10 +616,7 @@ export function computeBrowserPreviewRenderInfo(
   const showToggleButton = state.visible;
 
   // Compute WebView scale based on display mode
-  const webViewScale =
-    state.displayMode === PreviewDisplayMode.Collapsed
-      ? state.scaleFactor
-      : 1.0;
+  const webViewScale = state.displayMode === PreviewDisplayMode.Collapsed ? state.scaleFactor : 1.0;
 
   // Compute container dimensions
   const containerWidth = formatDimension(state.currentSize.width);
@@ -631,21 +624,15 @@ export function computeBrowserPreviewRenderInfo(
 
   // Compute opacity for transitions
   let opacity = 1.0;
-  if (
-    state.transition.phase === TransitionPhase.Transitioning
-  ) {
+  if (state.transition.phase === TransitionPhase.Transitioning) {
     // During fade transitions, opacity goes from 1 → 0 → 1
     const progress = state.transition.progress;
     if (state.transition.animationType === 'fade') {
-      opacity = progress < 0.5
-        ? 1.0 - (progress * 2)
-        : (progress - 0.5) * 2;
+      opacity = progress < 0.5 ? 1.0 - progress * 2 : (progress - 0.5) * 2;
     }
   }
 
-  const isInteractive =
-    state.visible &&
-    state.transition.phase !== TransitionPhase.Transitioning;
+  const isInteractive = state.visible && state.transition.phase !== TransitionPhase.Transitioning;
 
   // Build accessibility label
   let accessibilityLabel = 'Browser preview';

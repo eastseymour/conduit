@@ -118,10 +118,7 @@ describe('TransactionStatus', () => {
   });
 
   it('values are usable as TransactionStatusName', () => {
-    const statuses: TransactionStatusName[] = [
-      TransactionStatus.Pending,
-      TransactionStatus.Posted,
-    ];
+    const statuses: TransactionStatusName[] = [TransactionStatus.Pending, TransactionStatus.Posted];
     expect(statuses).toHaveLength(2);
   });
 });
@@ -290,21 +287,19 @@ describe('ConduitConfig', () => {
 
 describe('assertValidConfig', () => {
   it('accepts valid config', () => {
-    expect(() =>
-      assertValidConfig({ clientId: 'abc', environment: 'sandbox' }),
-    ).not.toThrow();
+    expect(() => assertValidConfig({ clientId: 'abc', environment: 'sandbox' })).not.toThrow();
   });
 
   it('rejects empty clientId', () => {
-    expect(() =>
-      assertValidConfig({ clientId: '', environment: 'sandbox' }),
-    ).toThrow('clientId must be a non-empty string');
+    expect(() => assertValidConfig({ clientId: '', environment: 'sandbox' })).toThrow(
+      'clientId must be a non-empty string',
+    );
   });
 
   it('rejects whitespace-only clientId', () => {
-    expect(() =>
-      assertValidConfig({ clientId: '   ', environment: 'sandbox' }),
-    ).toThrow('clientId must be a non-empty string');
+    expect(() => assertValidConfig({ clientId: '   ', environment: 'sandbox' })).toThrow(
+      'clientId must be a non-empty string',
+    );
   });
 
   it('rejects zero navigation timeout', () => {
@@ -600,9 +595,9 @@ describe('LinkSession state machine', () => {
     ];
 
     test.each(validPairs)('%s → %s is valid', (from, to) => {
-      expect(
-        isValidLinkTransition(from as LinkSessionPhaseName, to as LinkSessionPhaseName),
-      ).toBe(true);
+      expect(isValidLinkTransition(from as LinkSessionPhaseName, to as LinkSessionPhaseName)).toBe(
+        true,
+      );
     });
   });
 
@@ -628,17 +623,23 @@ describe('LinkSession state machine', () => {
     ];
 
     test.each(invalidPairs)('%s → %s is invalid', (from, to) => {
-      expect(
-        isValidLinkTransition(from as LinkSessionPhaseName, to as LinkSessionPhaseName),
-      ).toBe(false);
+      expect(isValidLinkTransition(from as LinkSessionPhaseName, to as LinkSessionPhaseName)).toBe(
+        false,
+      );
     });
   });
 
   describe('terminal states', () => {
     it('succeeded has no valid transitions', () => {
       const allPhases: LinkSessionPhaseName[] = [
-        'created', 'institution_selected', 'authenticating', 'mfa_required',
-        'extracting', 'succeeded', 'failed', 'cancelled',
+        'created',
+        'institution_selected',
+        'authenticating',
+        'mfa_required',
+        'extracting',
+        'succeeded',
+        'failed',
+        'cancelled',
       ];
       for (const to of allPhases) {
         expect(isValidLinkTransition('succeeded', to)).toBe(false);
@@ -647,8 +648,14 @@ describe('LinkSession state machine', () => {
 
     it('failed has no valid transitions', () => {
       const allPhases: LinkSessionPhaseName[] = [
-        'created', 'institution_selected', 'authenticating', 'mfa_required',
-        'extracting', 'succeeded', 'failed', 'cancelled',
+        'created',
+        'institution_selected',
+        'authenticating',
+        'mfa_required',
+        'extracting',
+        'succeeded',
+        'failed',
+        'cancelled',
       ];
       for (const to of allPhases) {
         expect(isValidLinkTransition('failed', to)).toBe(false);
@@ -657,8 +664,14 @@ describe('LinkSession state machine', () => {
 
     it('cancelled has no valid transitions', () => {
       const allPhases: LinkSessionPhaseName[] = [
-        'created', 'institution_selected', 'authenticating', 'mfa_required',
-        'extracting', 'succeeded', 'failed', 'cancelled',
+        'created',
+        'institution_selected',
+        'authenticating',
+        'mfa_required',
+        'extracting',
+        'succeeded',
+        'failed',
+        'cancelled',
       ];
       for (const to of allPhases) {
         expect(isValidLinkTransition('cancelled', to)).toBe(false);
@@ -719,6 +732,7 @@ describe('LinkSession state machine', () => {
 
 describe('type exports from index', () => {
   it('all new types are importable from types/index', () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const types = require('../src/types');
     expect(types.AccountType).toBeDefined();
     expect(types.TransactionStatus).toBeDefined();
@@ -731,6 +745,7 @@ describe('type exports from index', () => {
   });
 
   it('existing types are still exported', () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const types = require('../src/types');
     expect(types.NavigationPhase).toBeDefined();
     expect(types.NavigationErrorCode).toBeDefined();

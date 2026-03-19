@@ -37,12 +37,8 @@ describe('CookieManager', () => {
     });
 
     it('overwrites cookies with same key', async () => {
-      await manager.setCookies([
-        { name: 'session', value: 'old', domain: 'example.com' },
-      ]);
-      await manager.setCookies([
-        { name: 'session', value: 'new', domain: 'example.com' },
-      ]);
+      await manager.setCookies([{ name: 'session', value: 'old', domain: 'example.com' }]);
+      await manager.setCookies([{ name: 'session', value: 'new', domain: 'example.com' }]);
       const cookies = await manager.getCookies();
       expect(cookies).toHaveLength(1);
       expect(cookies[0]!.value).toBe('new');
@@ -61,17 +57,13 @@ describe('CookieManager', () => {
     });
 
     it('matches subdomain cookies', async () => {
-      await manager.setCookies([
-        { name: 'a', value: '1', domain: 'example.com' },
-      ]);
+      await manager.setCookies([{ name: 'a', value: '1', domain: 'example.com' }]);
       const cookies = await manager.getCookies('sub.example.com');
       expect(cookies).toHaveLength(1);
     });
 
     it('includes cookies without domain', async () => {
-      await manager.setCookies([
-        { name: 'a', value: '1' },
-      ]);
+      await manager.setCookies([{ name: 'a', value: '1' }]);
       const cookies = await manager.getCookies('anything.com');
       expect(cookies).toHaveLength(1);
     });
@@ -121,9 +113,13 @@ describe('CookieManager', () => {
     it('persists and loads cookies', async () => {
       let stored: string | null = null;
       manager.setPersistence({
-        save: async (data) => { stored = data; },
+        save: async (data) => {
+          stored = data;
+        },
         load: async () => stored,
-        clear: async () => { stored = null; },
+        clear: async () => {
+          stored = null;
+        },
       });
 
       await manager.setCookies([{ name: 'session', value: 'abc', domain: 'bank.com' }]);
@@ -133,9 +129,13 @@ describe('CookieManager', () => {
       // Create new manager, load persisted cookies
       const manager2 = new CookieManager();
       manager2.setPersistence({
-        save: async (data) => { stored = data; },
+        save: async (data) => {
+          stored = data;
+        },
         load: async () => stored,
-        clear: async () => { stored = null; },
+        clear: async () => {
+          stored = null;
+        },
       });
       await manager2.loadCookies();
       const cookies = await manager2.getCookies();

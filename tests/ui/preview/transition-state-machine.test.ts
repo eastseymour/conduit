@@ -262,9 +262,7 @@ describe('TransitionStateMachine — complete()', () => {
 
   it('throws when not in transitioning phase', () => {
     const machine = new TransitionStateMachine();
-    expect(() => machine.complete()).toThrow(
-      "Cannot complete transition in phase 'idle'",
-    );
+    expect(() => machine.complete()).toThrow("Cannot complete transition in phase 'idle'");
   });
 });
 
@@ -429,14 +427,10 @@ describe('createTransitionTransitioningState()', () => {
   });
 
   it('clamps progress to [0, 1]', () => {
-    const state1 = createTransitionTransitioningState(
-      null, 'https://to.com', 'fade', -0.5, 300,
-    );
+    const state1 = createTransitionTransitioningState(null, 'https://to.com', 'fade', -0.5, 300);
     expect(state1.progress).toBe(0);
 
-    const state2 = createTransitionTransitioningState(
-      null, 'https://to.com', 'fade', 1.5, 300,
-    );
+    const state2 = createTransitionTransitioningState(null, 'https://to.com', 'fade', 1.5, 300);
     expect(state2.progress).toBe(1);
   });
 });

@@ -8,11 +8,7 @@
  * will implement this interface.
  */
 
-import type {
-  Credentials,
-  MfaChallenge,
-  MfaResponse,
-} from '../auth/types';
+import type { Credentials, MfaChallenge, MfaResponse } from '../auth/types';
 
 /**
  * Result of submitting credentials to a bank login page.

@@ -8,15 +8,9 @@
 import type {
   LoginSelectors,
   MfaSelectors,
-  AccountPageSelectors,
-  TransactionTableSelectors,
-  BankSelectors,
   ExtractionStrategy,
   FieldExtractor,
-  PageExtractorConfig,
-  BankExtractors,
   MfaDetectionRule,
-  MfaDetector,
   BankAdapterConfig,
   BankAdapterSummary,
   AdapterSearchOptions,
@@ -161,9 +155,7 @@ describe('Adapter Types', () => {
         },
         extractors: {},
         mfaDetector: {
-          rules: [
-            { selector: '#otp', challengeType: 'sms_code' },
-          ],
+          rules: [{ selector: '#otp', challengeType: 'sms_code' }],
         },
       };
       expect(config.bankId).toBe('test_bank');

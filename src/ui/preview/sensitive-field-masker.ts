@@ -18,11 +18,7 @@
  * 5. Script does not modify DOM structure, only applies CSS filters
  */
 
-import type {
-  SensitiveFieldConfig,
-  SensitiveFieldRule,
-  SensitiveFieldMaskResult,
-} from './types';
+import type { SensitiveFieldConfig, SensitiveFieldRule, SensitiveFieldMaskResult } from './types';
 
 // ─── Script Generation ───────────────────────────────────────────────
 
@@ -72,9 +68,7 @@ export function generateMaskingScript(config: SensitiveFieldConfig): string {
   }
 
   const blurRadius = Math.max(0, config.blurRadius);
-  const selectorsJson = JSON.stringify(
-    enabledRules.map((r: SensitiveFieldRule) => r.selector),
-  );
+  const selectorsJson = JSON.stringify(enabledRules.map((r: SensitiveFieldRule) => r.selector));
 
   // The script is an IIFE that returns a JSON result object.
   // It is designed to be injected via WebView.injectJavaScript().
@@ -173,9 +167,7 @@ export function generateUnmaskingScript(): string {
  * @precondition rawResult is a JSON string or null/undefined
  * @postcondition returns a well-formed SensitiveFieldMaskResult
  */
-export function parseMaskingResult(
-  rawResult: unknown,
-): SensitiveFieldMaskResult {
+export function parseMaskingResult(rawResult: unknown): SensitiveFieldMaskResult {
   if (rawResult === null || rawResult === undefined) {
     return {
       maskedCount: 0,

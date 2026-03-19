@@ -10,7 +10,9 @@ function createMockWebViewRef(): WebViewRef & { injectedScripts: string[] } {
   const injectedScripts: string[] = [];
   return {
     injectedScripts,
-    injectJavaScript: jest.fn((script: string) => { injectedScripts.push(script); }),
+    injectJavaScript: jest.fn((script: string) => {
+      injectedScripts.push(script);
+    }),
     reload: jest.fn(),
     goBack: jest.fn(),
     goForward: jest.fn(),
@@ -28,7 +30,9 @@ describe('BrowserEngine', () => {
     engine.setWebViewRef(mockRef);
   });
 
-  afterEach(() => { engine.dispose(); });
+  afterEach(() => {
+    engine.dispose();
+  });
 
   describe('initial state', () => {
     it('starts idle', () => {
@@ -144,7 +148,10 @@ describe('BrowserEngine', () => {
       engine.on(listener);
       engine.navigate('https://example.com');
       expect(listener).toHaveBeenCalledWith(
-        expect.objectContaining({ type: 'stateChange', state: expect.objectContaining({ phase: 'navigating' }) }),
+        expect.objectContaining({
+          type: 'stateChange',
+          state: expect.objectContaining({ phase: 'navigating' }),
+        }),
       );
     });
 
@@ -170,9 +177,14 @@ describe('BrowserEngine', () => {
       const last = mockRef.injectedScripts[mockRef.injectedScripts.length - 1]!;
       const match = last.match(/"messageId":"(msg_[^"]+)"/);
       if (match) {
-        engine.bridge.handleInboundMessage(JSON.stringify({
-          type: InboundMessageType.ScriptResult, messageId: 'r1', requestId: match[1], result: 'Test',
-        }));
+        engine.bridge.handleInboundMessage(
+          JSON.stringify({
+            type: InboundMessageType.ScriptResult,
+            messageId: 'r1',
+            requestId: match[1],
+            result: 'Test',
+          }),
+        );
       }
       const result = await promise;
       expect(result.success).toBe(true);
@@ -195,10 +207,14 @@ describe('BrowserEngine', () => {
       const last = mockRef.injectedScripts[mockRef.injectedScripts.length - 1]!;
       const match = last.match(/"messageId":"(msg_[^"]+)"/);
       if (match) {
-        engine.bridge.handleInboundMessage(JSON.stringify({
-          type: InboundMessageType.DOMContent, messageId: 'r1', requestId: match[1],
-          html: '<html><body>Hello</body></html>',
-        }));
+        engine.bridge.handleInboundMessage(
+          JSON.stringify({
+            type: InboundMessageType.DOMContent,
+            messageId: 'r1',
+            requestId: match[1],
+            html: '<html><body>Hello</body></html>',
+          }),
+        );
       }
       const result = await promise;
       expect(result.success).toBe(true);
@@ -220,10 +236,15 @@ describe('BrowserEngine', () => {
       const last = mockRef.injectedScripts[mockRef.injectedScripts.length - 1]!;
       const match = last.match(/"messageId":"(msg_[^"]+)"/);
       if (match) {
-        engine.bridge.handleInboundMessage(JSON.stringify({
-          type: InboundMessageType.ElementFound, messageId: 'r1', requestId: match[1],
-          selector: '#login', found: true,
-        }));
+        engine.bridge.handleInboundMessage(
+          JSON.stringify({
+            type: InboundMessageType.ElementFound,
+            messageId: 'r1',
+            requestId: match[1],
+            selector: '#login',
+            found: true,
+          }),
+        );
       }
       expect(await promise).toBe(true);
     });
@@ -236,10 +257,16 @@ describe('BrowserEngine', () => {
       const last = mockRef.injectedScripts[mockRef.injectedScripts.length - 1]!;
       const match = last.match(/"messageId":"(msg_[^"]+)"/);
       if (match) {
-        engine.bridge.handleInboundMessage(JSON.stringify({
-          type: InboundMessageType.ElementTimeout, messageId: 'r1', requestId: match[1],
-          selector: '#missing', found: false, elapsedMs: 100,
-        }));
+        engine.bridge.handleInboundMessage(
+          JSON.stringify({
+            type: InboundMessageType.ElementTimeout,
+            messageId: 'r1',
+            requestId: match[1],
+            selector: '#missing',
+            found: false,
+            elapsedMs: 100,
+          }),
+        );
       }
       expect(await promise).toBe(false);
     });
@@ -271,7 +298,9 @@ describe('BrowserEngine', () => {
     });
 
     it('setCookies requires loaded', async () => {
-      await expect(engine.setCookies([{ name: 'a', value: 'b' }])).rejects.toThrow('page is not loaded');
+      await expect(engine.setCookies([{ name: 'a', value: 'b' }])).rejects.toThrow(
+        'page is not loaded',
+      );
     });
 
     it('provides cookie manager', () => {
@@ -288,9 +317,14 @@ describe('BrowserEngine', () => {
       const last = mockRef.injectedScripts[mockRef.injectedScripts.length - 1]!;
       const match = last.match(/"messageId":"(msg_[^"]+)"/);
       if (match) {
-        engine.bridge.handleInboundMessage(JSON.stringify({
-          type: InboundMessageType.DOMContent, messageId: 'r1', requestId: match[1], html: '<html></html>',
-        }));
+        engine.bridge.handleInboundMessage(
+          JSON.stringify({
+            type: InboundMessageType.DOMContent,
+            messageId: 'r1',
+            requestId: match[1],
+            html: '<html></html>',
+          }),
+        );
       }
       await ep;
       expect(engine.phase).toBe(NavigationPhase.Complete);

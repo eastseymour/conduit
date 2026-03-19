@@ -1,12 +1,6 @@
 import { MfaHandler } from '../../src/auth/mfa-handler';
 import { AuthStateMachine } from '../../src/auth/auth-state-machine';
-import {
-  AuthCallbacks,
-  AuthEvent,
-  MfaChallenge,
-  MfaResponse,
-  ConduitAuthError,
-} from '../../src/auth/types';
+import { AuthCallbacks, MfaChallenge, MfaResponse, ConduitAuthError } from '../../src/auth/types';
 import type { BrowserDriver, MfaSubmitResult } from '../../src/browser/types';
 
 // ─── Helpers ─────────────────────────────────────────────────────────
@@ -32,9 +26,7 @@ function createMockBrowserDriver(
   };
 }
 
-function createMockCallbacks(
-  onMfaResponse: MfaResponse | null = null,
-): AuthCallbacks {
+function createMockCallbacks(onMfaResponse: MfaResponse | null = null): AuthCallbacks {
   return {
     onStateChange: jest.fn(),
     onMfaRequired: jest.fn().mockResolvedValue(onMfaResponse),
@@ -164,7 +156,8 @@ describe('MfaHandler', () => {
 
       const sm = createStateMachineInLoggingIn();
       const browser = createMockBrowserDriver(
-        jest.fn()
+        jest
+          .fn()
           .mockResolvedValueOnce({
             outcome: 'mfa_required',
             challenge: secondChallenge,
@@ -175,7 +168,8 @@ describe('MfaHandler', () => {
           } as MfaSubmitResult),
       );
 
-      const onMfaRequired = jest.fn()
+      const onMfaRequired = jest
+        .fn()
         .mockResolvedValueOnce({
           challengeId: 'c1',
           type: 'sms_code',
@@ -209,7 +203,8 @@ describe('MfaHandler', () => {
 
       const sm = createStateMachineInLoggingIn();
       const browser = createMockBrowserDriver(
-        jest.fn()
+        jest
+          .fn()
           .mockResolvedValueOnce({ outcome: 'mfa_required', challenge: makeChallenge(2) })
           .mockResolvedValueOnce({ outcome: 'mfa_required', challenge: makeChallenge(3) }),
       );
@@ -343,9 +338,11 @@ describe('MfaHandler', () => {
       const browser = createMockBrowserDriver();
       const callbacks: AuthCallbacks = {
         onStateChange: jest.fn(),
-        onMfaRequired: jest.fn().mockImplementation(
-          () => new Promise((resolve) => setTimeout(() => resolve(smsResponse), 500)),
-        ),
+        onMfaRequired: jest
+          .fn()
+          .mockImplementation(
+            () => new Promise((resolve) => setTimeout(() => resolve(smsResponse), 500)),
+          ),
       };
 
       const handler = new MfaHandler(sm, browser, callbacks, 3, 50); // 50ms timeout

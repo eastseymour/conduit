@@ -7,11 +7,7 @@ import {
   computeBrowserPreviewRenderInfo,
   type ScriptInjector,
 } from '../../../src/ui/preview/browser-preview-controller';
-import type {
-  BrowserPreviewState,
-  BrowserPreviewEvent,
-  BrowserPreviewConfig,
-} from '../../../src/ui/preview/types';
+import type { BrowserPreviewState, BrowserPreviewEvent } from '../../../src/ui/preview/types';
 import {
   PreviewDisplayMode,
   PreviewPosition,
@@ -19,10 +15,7 @@ import {
   TransitionType,
   DEFAULT_BROWSER_PREVIEW_CONFIG,
 } from '../../../src/ui/preview/types';
-import {
-  NavigationPhase,
-  type NavigationState,
-} from '../../../src/types/navigation';
+import { NavigationPhase, type NavigationState } from '../../../src/types/navigation';
 
 // ─── Mock Script Injector ────────────────────────────────────────────
 
@@ -77,9 +70,7 @@ describe('BrowserPreviewController — construction', () => {
     const controller = new BrowserPreviewController({
       initialDisplayMode: PreviewDisplayMode.Collapsed,
     });
-    expect(controller.state.currentSize).toEqual(
-      DEFAULT_BROWSER_PREVIEW_CONFIG.collapsedSize,
-    );
+    expect(controller.state.currentSize).toEqual(DEFAULT_BROWSER_PREVIEW_CONFIG.collapsedSize);
     controller.dispose();
   });
 
@@ -87,9 +78,7 @@ describe('BrowserPreviewController — construction', () => {
     const controller = new BrowserPreviewController({
       initialDisplayMode: PreviewDisplayMode.Expanded,
     });
-    expect(controller.state.currentSize).toEqual(
-      DEFAULT_BROWSER_PREVIEW_CONFIG.expandedSize,
-    );
+    expect(controller.state.currentSize).toEqual(DEFAULT_BROWSER_PREVIEW_CONFIG.expandedSize);
     controller.dispose();
   });
 
@@ -179,17 +168,13 @@ describe('BrowserPreviewController — expand/collapse', () => {
 
   it('updates currentSize on expand', () => {
     controller.expand();
-    expect(controller.state.currentSize).toEqual(
-      DEFAULT_BROWSER_PREVIEW_CONFIG.expandedSize,
-    );
+    expect(controller.state.currentSize).toEqual(DEFAULT_BROWSER_PREVIEW_CONFIG.expandedSize);
   });
 
   it('updates currentSize on collapse', () => {
     controller.expand();
     controller.collapse();
-    expect(controller.state.currentSize).toEqual(
-      DEFAULT_BROWSER_PREVIEW_CONFIG.collapsedSize,
-    );
+    expect(controller.state.currentSize).toEqual(DEFAULT_BROWSER_PREVIEW_CONFIG.collapsedSize);
   });
 
   it('emits toggle event on expand', () => {

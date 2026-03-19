@@ -29,9 +29,10 @@ function createMockBrowserDriver(overrides: Partial<BrowserDriver> = {}): Browse
 
 // ─── Mock Callbacks ──────────────────────────────────────────────────
 
-function createMockCallbacks(
-  onMfaResponse: MfaResponse | null = null,
-): { callbacks: AuthCallbacks; events: AuthEvent[] } {
+function createMockCallbacks(onMfaResponse: MfaResponse | null = null): {
+  callbacks: AuthCallbacks;
+  events: AuthEvent[];
+} {
   const events: AuthEvent[] = [];
   return {
     events,
@@ -56,7 +57,7 @@ describe('AuthModule', () => {
   describe('successful login without MFA', () => {
     it('should authenticate successfully', async () => {
       const browser = createMockBrowserDriver();
-      const { callbacks, events } = createMockCallbacks();
+      const { callbacks, events: _events } = createMockCallbacks();
 
       const result = await authModule.authenticate(
         'chase',
@@ -158,7 +159,7 @@ describe('AuthModule', () => {
           reason: 'Invalid username or password',
         } as LoginSubmitResult),
       });
-      const { callbacks, events } = createMockCallbacks();
+      const { callbacks, events: _events } = createMockCallbacks();
 
       const result = await authModule.authenticate(
         'chase',
@@ -225,7 +226,7 @@ describe('AuthModule', () => {
           retryAfter,
         } as LoginSubmitResult),
       });
-      const { callbacks, events } = createMockCallbacks();
+      const { callbacks, events: _events } = createMockCallbacks();
 
       const result = await authModule.authenticate(
         'chase',
@@ -291,7 +292,7 @@ describe('AuthModule', () => {
         type: 'sms_code',
         code: '123456',
       };
-      const { callbacks, events } = createMockCallbacks(mfaResponse);
+      const { callbacks, events: _events } = createMockCallbacks(mfaResponse);
 
       const result = await authModule.authenticate(
         'chase',
@@ -379,7 +380,7 @@ describe('AuthModule', () => {
       });
 
       // Host app returns null to cancel
-      const { callbacks, events } = createMockCallbacks(null);
+      const { callbacks, events: _events } = createMockCallbacks(null);
 
       const result = await authModule.authenticate(
         'chase',
@@ -516,7 +517,8 @@ describe('AuthModule', () => {
           outcome: 'mfa_required',
           challenge: firstChallenge,
         }),
-        submitMfaResponse: jest.fn()
+        submitMfaResponse: jest
+          .fn()
           .mockResolvedValueOnce({
             outcome: 'mfa_required',
             challenge: secondChallenge,
@@ -527,7 +529,8 @@ describe('AuthModule', () => {
           } as MfaSubmitResult),
       });
 
-      const onMfaRequired = jest.fn()
+      const onMfaRequired = jest
+        .fn()
         .mockResolvedValueOnce({
           challengeId: 'c1',
           type: 'sms_code',
@@ -558,10 +561,10 @@ describe('AuthModule', () => {
       const stateSequence = events.map((e) => e.type);
       expect(stateSequence).toEqual([
         'logging_in',
-        'mfa_required',      // first challenge
-        'mfa_submitting',     // submitting first response
-        'mfa_required',       // second challenge (retry)
-        'mfa_submitting',     // submitting second response
+        'mfa_required', // first challenge
+        'mfa_submitting', // submitting first response
+        'mfa_required', // second challenge (retry)
+        'mfa_submitting', // submitting second response
         'authenticated',
       ]);
     });
@@ -580,14 +583,15 @@ describe('AuthModule', () => {
           outcome: 'mfa_required',
           challenge: makeChallenge(1),
         }),
-        submitMfaResponse: jest.fn()
+        submitMfaResponse: jest
+          .fn()
           .mockResolvedValueOnce({ outcome: 'mfa_required', challenge: makeChallenge(2) })
           .mockResolvedValueOnce({ outcome: 'mfa_required', challenge: makeChallenge(3) }),
       });
 
-      let callCount = 0;
+      let _callCount = 0;
       const onMfaRequired = jest.fn().mockImplementation((ch: MfaChallenge) => {
-        callCount++;
+        _callCount++;
         return Promise.resolve({
           challengeId: ch.challengeId,
           type: 'sms_code',
@@ -682,10 +686,17 @@ describe('AuthModule', () => {
       // Create a browser that takes a while to respond
       const browser = createMockBrowserDriver({
         submitCredentials: jest.fn().mockImplementation(
-          () => new Promise((resolve) => setTimeout(() => resolve({
-            outcome: 'success',
-            sessionToken: 'tok',
-          }), 100)),
+          () =>
+            new Promise((resolve) =>
+              setTimeout(
+                () =>
+                  resolve({
+                    outcome: 'success',
+                    sessionToken: 'tok',
+                  }),
+                100,
+              ),
+            ),
         ),
       });
       const { callbacks: cb1 } = createMockCallbacks();
@@ -701,12 +712,7 @@ describe('AuthModule', () => {
 
       // Immediately try second auth flow
       await expect(
-        authModule.authenticate(
-          'boa',
-          { username: 'user2', password: 'pass2' },
-          browser,
-          cb2,
-        ),
+        authModule.authenticate('boa', { username: 'user2', password: 'pass2' }, browser, cb2),
       ).rejects.toThrow('already active');
 
       // Clean up first auth flow
@@ -746,10 +752,17 @@ describe('AuthModule', () => {
       const module = new AuthModule({ timeoutMs: 50 });
       const browser = createMockBrowserDriver({
         submitCredentials: jest.fn().mockImplementation(
-          () => new Promise((resolve) => setTimeout(() => resolve({
-            outcome: 'success',
-            sessionToken: 'tok',
-          }), 200)),
+          () =>
+            new Promise((resolve) =>
+              setTimeout(
+                () =>
+                  resolve({
+                    outcome: 'success',
+                    sessionToken: 'tok',
+                  }),
+                200,
+              ),
+            ),
         ),
       });
       const { callbacks } = createMockCallbacks();
@@ -776,7 +789,12 @@ describe('AuthModule', () => {
       const { callbacks } = createMockCallbacks();
 
       await expect(
-        authModule.authenticate('chase', { username: 'user', password: 'pass' }, browser, callbacks),
+        authModule.authenticate(
+          'chase',
+          { username: 'user', password: 'pass' },
+          browser,
+          callbacks,
+        ),
       ).rejects.toThrow('Navigation failed');
 
       expect(cleanup).toHaveBeenCalled();

@@ -45,16 +45,14 @@ describe('BankAdapterRegistry', () => {
     });
 
     it('throws AdapterRegistrationError for invalid config', () => {
-      expect(() =>
-        registry.register(makeValidConfig({ bankId: '' })),
-      ).toThrow(AdapterRegistrationError);
+      expect(() => registry.register(makeValidConfig({ bankId: '' }))).toThrow(
+        AdapterRegistrationError,
+      );
     });
 
     it('throws AdapterRegistrationError for duplicate bankId', () => {
       registry.register(makeValidConfig());
-      expect(() =>
-        registry.register(makeValidConfig()),
-      ).toThrow(AdapterRegistrationError);
+      expect(() => registry.register(makeValidConfig())).toThrow(AdapterRegistrationError);
     });
 
     it('error includes bankId and validation errors', () => {
@@ -115,25 +113,43 @@ describe('BankAdapterRegistry', () => {
     });
 
     it('includes correct capabilities in summaries', () => {
-      registry.register(makeValidConfig({
-        bankId: 'full_bank',
-        name: 'Full Bank',
-        extractors: {
-          accounts: {
-            readySelector: '.accounts',
-            fields: [{ fieldName: 'n', selector: '.n', strategy: { type: 'textContent' }, required: true }],
+      registry.register(
+        makeValidConfig({
+          bankId: 'full_bank',
+          name: 'Full Bank',
+          extractors: {
+            accounts: {
+              readySelector: '.accounts',
+              fields: [
+                {
+                  fieldName: 'n',
+                  selector: '.n',
+                  strategy: { type: 'textContent' },
+                  required: true,
+                },
+              ],
+            },
+            transactions: {
+              readySelector: '.tx',
+              fields: [
+                {
+                  fieldName: 't',
+                  selector: '.t',
+                  strategy: { type: 'textContent' },
+                  required: true,
+                },
+              ],
+            },
           },
-          transactions: {
-            readySelector: '.tx',
-            fields: [{ fieldName: 't', selector: '.t', strategy: { type: 'textContent' }, required: true }],
-          },
-        },
-      }));
-      registry.register(makeValidConfig({
-        bankId: 'basic_bank',
-        name: 'Basic Bank',
-        extractors: {},
-      }));
+        }),
+      );
+      registry.register(
+        makeValidConfig({
+          bankId: 'basic_bank',
+          name: 'Basic Bank',
+          extractors: {},
+        }),
+      );
 
       const list = registry.list();
       const full = list.find((s) => s.bankId === 'full_bank');
@@ -149,16 +165,25 @@ describe('BankAdapterRegistry', () => {
   describe('search', () => {
     beforeEach(() => {
       registry.register(makeValidConfig({ bankId: 'chase', name: 'Chase' }));
-      registry.register(makeValidConfig({
-        bankId: 'bofa',
-        name: 'Bank of America',
-        extractors: {
-          accounts: {
-            readySelector: '.accounts',
-            fields: [{ fieldName: 'n', selector: '.n', strategy: { type: 'textContent' }, required: true }],
+      registry.register(
+        makeValidConfig({
+          bankId: 'bofa',
+          name: 'Bank of America',
+          extractors: {
+            accounts: {
+              readySelector: '.accounts',
+              fields: [
+                {
+                  fieldName: 'n',
+                  selector: '.n',
+                  strategy: { type: 'textContent' },
+                  required: true,
+                },
+              ],
+            },
           },
-        },
-      }));
+        }),
+      );
       registry.register(makeValidConfig({ bankId: 'wells_fargo', name: 'Wells Fargo' }));
     });
 

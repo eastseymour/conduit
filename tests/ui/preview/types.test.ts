@@ -18,7 +18,6 @@ import {
   DEFAULT_BROWSER_PREVIEW_CONFIG,
   DEFAULT_SENSITIVE_FIELD_RULES,
   type BrowserPreviewConfig,
-  type PreviewDimension,
 } from '../../../src/ui/preview/types';
 
 // ─── Const Enum Tests ────────────────────────────────────────────────
@@ -186,15 +185,13 @@ describe('isValidTransitionPhaseChange()', () => {
 
 describe('assertValidTransitionPhaseChange()', () => {
   it('does not throw for valid transitions', () => {
-    expect(() =>
-      assertValidTransitionPhaseChange('idle', 'transitioning'),
-    ).not.toThrow();
+    expect(() => assertValidTransitionPhaseChange('idle', 'transitioning')).not.toThrow();
   });
 
   it('throws for invalid transitions', () => {
-    expect(() =>
-      assertValidTransitionPhaseChange('idle', 'complete'),
-    ).toThrow('Invalid transition phase change: idle → complete');
+    expect(() => assertValidTransitionPhaseChange('idle', 'complete')).toThrow(
+      'Invalid transition phase change: idle → complete',
+    );
   });
 });
 
@@ -301,9 +298,7 @@ describe('validateBrowserPreviewConfig()', () => {
     };
     const result = validateBrowserPreviewConfig(config);
     expect(result.valid).toBe(false);
-    expect(result.errors).toContain(
-      'sensitiveFieldConfig.blurRadius must be non-negative',
-    );
+    expect(result.errors).toContain('sensitiveFieldConfig.blurRadius must be non-negative');
   });
 
   it('rejects rules with empty selectors', () => {
@@ -317,9 +312,7 @@ describe('validateBrowserPreviewConfig()', () => {
     };
     const result = validateBrowserPreviewConfig(config);
     expect(result.valid).toBe(false);
-    expect(result.errors).toContain(
-      'sensitiveFieldConfig.rules[0].selector must be non-empty',
-    );
+    expect(result.errors).toContain('sensitiveFieldConfig.rules[0].selector must be non-empty');
   });
 
   it('rejects rules with empty labels', () => {
@@ -333,17 +326,13 @@ describe('validateBrowserPreviewConfig()', () => {
     };
     const result = validateBrowserPreviewConfig(config);
     expect(result.valid).toBe(false);
-    expect(result.errors).toContain(
-      'sensitiveFieldConfig.rules[0].label must be non-empty',
-    );
+    expect(result.errors).toContain('sensitiveFieldConfig.rules[0].label must be non-empty');
   });
 });
 
 describe('assertValidBrowserPreviewConfig()', () => {
   it('does not throw for valid config', () => {
-    expect(() =>
-      assertValidBrowserPreviewConfig(DEFAULT_BROWSER_PREVIEW_CONFIG),
-    ).not.toThrow();
+    expect(() => assertValidBrowserPreviewConfig(DEFAULT_BROWSER_PREVIEW_CONFIG)).not.toThrow();
   });
 
   it('throws for invalid config', () => {
@@ -351,9 +340,7 @@ describe('assertValidBrowserPreviewConfig()', () => {
       ...DEFAULT_BROWSER_PREVIEW_CONFIG,
       scaleFactor: 0,
     };
-    expect(() => assertValidBrowserPreviewConfig(config)).toThrow(
-      'Invalid BrowserPreviewConfig',
-    );
+    expect(() => assertValidBrowserPreviewConfig(config)).toThrow('Invalid BrowserPreviewConfig');
   });
 });
 

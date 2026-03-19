@@ -52,7 +52,11 @@ export interface Credentials {
 
 // ─── MFA Challenge Types (Discriminated Union) ───────────────────────
 
-export type MfaChallengeType = 'sms_code' | 'email_code' | 'security_questions' | 'push_notification';
+export type MfaChallengeType =
+  | 'sms_code'
+  | 'email_code'
+  | 'security_questions'
+  | 'push_notification';
 
 /**
  * Base interface for all MFA challenges.
@@ -286,7 +290,10 @@ export function assertValidMfaResponse(response: MfaResponse, challenge: MfaChal
       break;
     case 'security_questions':
       if (!response.answers || response.answers.length === 0) {
-        throw new ConduitAuthError('Security question answers must be non-empty', 'INVALID_MFA_RESPONSE');
+        throw new ConduitAuthError(
+          'Security question answers must be non-empty',
+          'INVALID_MFA_RESPONSE',
+        );
       }
       break;
     case 'push_notification':

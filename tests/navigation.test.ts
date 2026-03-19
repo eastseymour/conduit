@@ -157,12 +157,18 @@ describe('Navigation State Machine', () => {
 
       const phases = states.map((s) => {
         switch (s.phase) {
-          case 'idle': return 'idle';
-          case 'navigating': return `navigating:${s.url}`;
-          case 'loaded': return `loaded:${s.statusCode}`;
-          case 'extracting': return `extracting:${s.extractionStartedAt > 0}`;
-          case 'complete': return `complete:${s.durationMs >= 0}`;
-          case 'error': return `error:${s.error.code}`;
+          case 'idle':
+            return 'idle';
+          case 'navigating':
+            return `navigating:${s.url}`;
+          case 'loaded':
+            return `loaded:${s.statusCode}`;
+          case 'extracting':
+            return `extracting:${s.extractionStartedAt > 0}`;
+          case 'complete':
+            return `complete:${s.durationMs >= 0}`;
+          case 'error':
+            return `error:${s.error.code}`;
         }
       });
 

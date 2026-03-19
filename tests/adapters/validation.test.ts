@@ -23,9 +23,7 @@ function makeValidConfig(overrides: Partial<BankAdapterConfig> = {}): BankAdapte
     },
     extractors: {},
     mfaDetector: {
-      rules: [
-        { selector: '#otp', challengeType: 'sms_code' },
-      ],
+      rules: [{ selector: '#otp', challengeType: 'sms_code' }],
     },
     ...overrides,
   } as BankAdapterConfig;
@@ -72,7 +70,12 @@ describe('validateBankAdapterConfig', () => {
           accounts: {
             readySelector: '.accounts',
             fields: [
-              { fieldName: 'name', selector: '.name', strategy: { type: 'textContent' }, required: true },
+              {
+                fieldName: 'name',
+                selector: '.name',
+                strategy: { type: 'textContent' },
+                required: true,
+              },
             ],
           },
         },
@@ -137,46 +140,56 @@ describe('validateBankAdapterConfig', () => {
     });
 
     it('accepts http URL', () => {
-      const result = validateBankAdapterConfig(makeValidConfig({ loginUrl: 'http://test.com/login' }));
+      const result = validateBankAdapterConfig(
+        makeValidConfig({ loginUrl: 'http://test.com/login' }),
+      );
       expect(result.valid).toBe(true);
     });
 
     it('accepts https URL', () => {
-      const result = validateBankAdapterConfig(makeValidConfig({ loginUrl: 'https://test.com/login' }));
+      const result = validateBankAdapterConfig(
+        makeValidConfig({ loginUrl: 'https://test.com/login' }),
+      );
       expect(result.valid).toBe(true);
     });
   });
 
   describe('login selectors validation', () => {
     it('rejects empty usernameInput', () => {
-      const result = validateBankAdapterConfig(makeValidConfig({
-        selectors: {
-          login: { usernameInput: '', passwordInput: '#pass', submitButton: '#submit' },
-          mfa: {},
-        },
-      }));
+      const result = validateBankAdapterConfig(
+        makeValidConfig({
+          selectors: {
+            login: { usernameInput: '', passwordInput: '#pass', submitButton: '#submit' },
+            mfa: {},
+          },
+        }),
+      );
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(expect.stringContaining('usernameInput'));
     });
 
     it('rejects empty passwordInput', () => {
-      const result = validateBankAdapterConfig(makeValidConfig({
-        selectors: {
-          login: { usernameInput: '#user', passwordInput: '', submitButton: '#submit' },
-          mfa: {},
-        },
-      }));
+      const result = validateBankAdapterConfig(
+        makeValidConfig({
+          selectors: {
+            login: { usernameInput: '#user', passwordInput: '', submitButton: '#submit' },
+            mfa: {},
+          },
+        }),
+      );
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(expect.stringContaining('passwordInput'));
     });
 
     it('rejects empty submitButton', () => {
-      const result = validateBankAdapterConfig(makeValidConfig({
-        selectors: {
-          login: { usernameInput: '#user', passwordInput: '#pass', submitButton: '' },
-          mfa: {},
-        },
-      }));
+      const result = validateBankAdapterConfig(
+        makeValidConfig({
+          selectors: {
+            login: { usernameInput: '#user', passwordInput: '#pass', submitButton: '' },
+            mfa: {},
+          },
+        }),
+      );
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(expect.stringContaining('submitButton'));
     });
@@ -184,53 +197,63 @@ describe('validateBankAdapterConfig', () => {
 
   describe('MFA detector validation', () => {
     it('rejects empty rules array', () => {
-      const result = validateBankAdapterConfig(makeValidConfig({
-        mfaDetector: { rules: [] },
-      }));
+      const result = validateBankAdapterConfig(
+        makeValidConfig({
+          mfaDetector: { rules: [] },
+        }),
+      );
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(expect.stringContaining('at least one'));
     });
 
     it('rejects rule with empty selector', () => {
-      const result = validateBankAdapterConfig(makeValidConfig({
-        mfaDetector: {
-          rules: [{ selector: '', challengeType: 'sms_code' }],
-        },
-      }));
+      const result = validateBankAdapterConfig(
+        makeValidConfig({
+          mfaDetector: {
+            rules: [{ selector: '', challengeType: 'sms_code' }],
+          },
+        }),
+      );
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(expect.stringContaining('selector'));
     });
 
     it('rejects negative priority', () => {
-      const result = validateBankAdapterConfig(makeValidConfig({
-        mfaDetector: {
-          rules: [{ selector: '#otp', challengeType: 'sms_code', priority: -1 }],
-        },
-      }));
+      const result = validateBankAdapterConfig(
+        makeValidConfig({
+          mfaDetector: {
+            rules: [{ selector: '#otp', challengeType: 'sms_code', priority: -1 }],
+          },
+        }),
+      );
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(expect.stringContaining('priority'));
     });
 
     it('rejects negative detectionTimeoutMs', () => {
-      const result = validateBankAdapterConfig(makeValidConfig({
-        mfaDetector: {
-          rules: [{ selector: '#otp', challengeType: 'sms_code' }],
-          detectionTimeoutMs: -100,
-        },
-      }));
+      const result = validateBankAdapterConfig(
+        makeValidConfig({
+          mfaDetector: {
+            rules: [{ selector: '#otp', challengeType: 'sms_code' }],
+            detectionTimeoutMs: -100,
+          },
+        }),
+      );
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(expect.stringContaining('detectionTimeoutMs'));
     });
 
     it('warns about duplicate selectors', () => {
-      const result = validateBankAdapterConfig(makeValidConfig({
-        mfaDetector: {
-          rules: [
-            { selector: '#otp', challengeType: 'sms_code' },
-            { selector: '#otp', challengeType: 'email_code' },
-          ],
-        },
-      }));
+      const result = validateBankAdapterConfig(
+        makeValidConfig({
+          mfaDetector: {
+            rules: [
+              { selector: '#otp', challengeType: 'sms_code' },
+              { selector: '#otp', challengeType: 'email_code' },
+            ],
+          },
+        }),
+      );
       expect(result.valid).toBe(true); // Warnings don't fail
       expect(result.warnings).toContainEqual(expect.stringContaining('duplicated'));
     });
@@ -238,99 +261,126 @@ describe('validateBankAdapterConfig', () => {
 
   describe('extractor validation', () => {
     it('rejects empty readySelector in extractors', () => {
-      const result = validateBankAdapterConfig(makeValidConfig({
-        extractors: {
-          accounts: {
-            readySelector: '',
-            fields: [
-              { fieldName: 'name', selector: '.name', strategy: { type: 'textContent' }, required: true },
-            ],
+      const result = validateBankAdapterConfig(
+        makeValidConfig({
+          extractors: {
+            accounts: {
+              readySelector: '',
+              fields: [
+                {
+                  fieldName: 'name',
+                  selector: '.name',
+                  strategy: { type: 'textContent' },
+                  required: true,
+                },
+              ],
+            },
           },
-        },
-      }));
+        }),
+      );
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(expect.stringContaining('readySelector'));
     });
 
     it('rejects invalid regex pattern', () => {
-      const result = validateBankAdapterConfig(makeValidConfig({
-        extractors: {
-          accounts: {
-            readySelector: '.accounts',
-            fields: [
-              {
-                fieldName: 'balance',
-                selector: '.balance',
-                strategy: { type: 'regex', pattern: '[invalid(' },
-                required: true,
-              },
-            ],
+      const result = validateBankAdapterConfig(
+        makeValidConfig({
+          extractors: {
+            accounts: {
+              readySelector: '.accounts',
+              fields: [
+                {
+                  fieldName: 'balance',
+                  selector: '.balance',
+                  strategy: { type: 'regex', pattern: '[invalid(' },
+                  required: true,
+                },
+              ],
+            },
           },
-        },
-      }));
+        }),
+      );
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(expect.stringContaining('regex'));
     });
 
     it('rejects attribute strategy with empty attributeName', () => {
-      const result = validateBankAdapterConfig(makeValidConfig({
-        extractors: {
-          accounts: {
-            readySelector: '.accounts',
-            fields: [
-              {
-                fieldName: 'link',
-                selector: 'a',
-                strategy: { type: 'attribute', attributeName: '' },
-                required: true,
-              },
-            ],
+      const result = validateBankAdapterConfig(
+        makeValidConfig({
+          extractors: {
+            accounts: {
+              readySelector: '.accounts',
+              fields: [
+                {
+                  fieldName: 'link',
+                  selector: 'a',
+                  strategy: { type: 'attribute', attributeName: '' },
+                  required: true,
+                },
+              ],
+            },
           },
-        },
-      }));
+        }),
+      );
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(expect.stringContaining('attributeName'));
     });
 
     it('warns about empty fields array', () => {
-      const result = validateBankAdapterConfig(makeValidConfig({
-        extractors: {
-          accounts: {
-            readySelector: '.accounts',
-            fields: [],
+      const result = validateBankAdapterConfig(
+        makeValidConfig({
+          extractors: {
+            accounts: {
+              readySelector: '.accounts',
+              fields: [],
+            },
           },
-        },
-      }));
+        }),
+      );
       expect(result.valid).toBe(true);
       expect(result.warnings).toContainEqual(expect.stringContaining('empty'));
     });
 
     it('warns about duplicate fieldNames', () => {
-      const result = validateBankAdapterConfig(makeValidConfig({
-        extractors: {
-          accounts: {
-            readySelector: '.accounts',
-            fields: [
-              { fieldName: 'name', selector: '.name1', strategy: { type: 'textContent' }, required: true },
-              { fieldName: 'name', selector: '.name2', strategy: { type: 'textContent' }, required: true },
-            ],
+      const result = validateBankAdapterConfig(
+        makeValidConfig({
+          extractors: {
+            accounts: {
+              readySelector: '.accounts',
+              fields: [
+                {
+                  fieldName: 'name',
+                  selector: '.name1',
+                  strategy: { type: 'textContent' },
+                  required: true,
+                },
+                {
+                  fieldName: 'name',
+                  selector: '.name2',
+                  strategy: { type: 'textContent' },
+                  required: true,
+                },
+              ],
+            },
           },
-        },
-      }));
+        }),
+      );
       expect(result.valid).toBe(true);
       expect(result.warnings).toContainEqual(expect.stringContaining('duplicated'));
     });
 
     it('rejects negative readyTimeoutMs', () => {
-      const result = validateBankAdapterConfig(makeValidConfig({
-        extractors: {
-          accounts: {
-            readySelector: '.accounts',
-            readyTimeoutMs: -5000,
-            fields: [],
+      const result = validateBankAdapterConfig(
+        makeValidConfig({
+          extractors: {
+            accounts: {
+              readySelector: '.accounts',
+              readyTimeoutMs: -5000,
+              fields: [],
+            },
           },
-        },
-      }));
+        }),
+      );
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(expect.stringContaining('readyTimeoutMs'));
     });
@@ -351,8 +401,8 @@ describe('assertValidBankAdapterConfig', () => {
   });
 
   it('throws for invalid config with descriptive message', () => {
-    expect(() =>
-      assertValidBankAdapterConfig(makeValidConfig({ bankId: '' })),
-    ).toThrow(/Invalid bank adapter config/);
+    expect(() => assertValidBankAdapterConfig(makeValidConfig({ bankId: '' }))).toThrow(
+      /Invalid bank adapter config/,
+    );
   });
 });

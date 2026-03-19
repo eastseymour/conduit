@@ -8,39 +8,37 @@ import {
 
 describe('assertValidCredentials', () => {
   it('should accept valid credentials', () => {
-    expect(() =>
-      assertValidCredentials({ username: 'user', password: 'pass' }),
-    ).not.toThrow();
+    expect(() => assertValidCredentials({ username: 'user', password: 'pass' })).not.toThrow();
   });
 
   it('should throw for empty username', () => {
-    expect(() =>
-      assertValidCredentials({ username: '', password: 'pass' }),
-    ).toThrow(ConduitAuthError);
-    expect(() =>
-      assertValidCredentials({ username: '', password: 'pass' }),
-    ).toThrow('Username must be non-empty');
+    expect(() => assertValidCredentials({ username: '', password: 'pass' })).toThrow(
+      ConduitAuthError,
+    );
+    expect(() => assertValidCredentials({ username: '', password: 'pass' })).toThrow(
+      'Username must be non-empty',
+    );
   });
 
   it('should throw for whitespace-only username', () => {
-    expect(() =>
-      assertValidCredentials({ username: '   ', password: 'pass' }),
-    ).toThrow(ConduitAuthError);
+    expect(() => assertValidCredentials({ username: '   ', password: 'pass' })).toThrow(
+      ConduitAuthError,
+    );
   });
 
   it('should throw for empty password', () => {
-    expect(() =>
-      assertValidCredentials({ username: 'user', password: '' }),
-    ).toThrow(ConduitAuthError);
-    expect(() =>
-      assertValidCredentials({ username: 'user', password: '' }),
-    ).toThrow('Password must be non-empty');
+    expect(() => assertValidCredentials({ username: 'user', password: '' })).toThrow(
+      ConduitAuthError,
+    );
+    expect(() => assertValidCredentials({ username: 'user', password: '' })).toThrow(
+      'Password must be non-empty',
+    );
   });
 
   it('should throw for whitespace-only password', () => {
-    expect(() =>
-      assertValidCredentials({ username: 'user', password: '  ' }),
-    ).toThrow(ConduitAuthError);
+    expect(() => assertValidCredentials({ username: 'user', password: '  ' })).toThrow(
+      ConduitAuthError,
+    );
   });
 
   it('should have INVALID_CREDENTIALS error code', () => {
@@ -77,9 +75,7 @@ describe('assertValidMfaResponse', () => {
         type: 'sms_code',
         code: '123456',
       };
-      expect(() => assertValidMfaResponse(response, challenge)).toThrow(
-        'does not match challenge',
-      );
+      expect(() => assertValidMfaResponse(response, challenge)).toThrow('does not match challenge');
     });
 
     it('should throw for empty code', () => {

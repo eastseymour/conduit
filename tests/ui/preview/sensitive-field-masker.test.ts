@@ -67,9 +67,7 @@ describe('generateMaskingScript()', () => {
     const config: SensitiveFieldConfig = {
       enabled: true,
       blurRadius: 8,
-      rules: [
-        { selector: 'input[type="password"]', label: 'Passwords', enabled: false },
-      ],
+      rules: [{ selector: 'input[type="password"]', label: 'Passwords', enabled: false }],
     };
     const script = generateMaskingScript(config);
     expect(script).toContain('"maskedCount":0');
@@ -103,9 +101,7 @@ describe('generateMaskingScript()', () => {
     const config: SensitiveFieldConfig = {
       enabled: true,
       blurRadius: 16,
-      rules: [
-        { selector: 'input[type="password"]', label: 'Passwords', enabled: true },
-      ],
+      rules: [{ selector: 'input[type="password"]', label: 'Passwords', enabled: true }],
     };
     const script = generateMaskingScript(config);
     expect(script).toContain('var BLUR_RADIUS = 16');
@@ -115,9 +111,7 @@ describe('generateMaskingScript()', () => {
     const config: SensitiveFieldConfig = {
       enabled: true,
       blurRadius: -5,
-      rules: [
-        { selector: 'input[type="password"]', label: 'Passwords', enabled: true },
-      ],
+      rules: [{ selector: 'input[type="password"]', label: 'Passwords', enabled: true }],
     };
     const script = generateMaskingScript(config);
     expect(script).toContain('var BLUR_RADIUS = 0');
@@ -197,10 +191,7 @@ describe('parseMaskingResult()', () => {
     });
     const result = parseMaskingResult(raw);
     expect(result.maskedCount).toBe(3);
-    expect(result.matchedSelectors).toEqual([
-      'input[type="password"]',
-      'input[name*="ssn"]',
-    ]);
+    expect(result.matchedSelectors).toEqual(['input[type="password"]', 'input[name*="ssn"]']);
     expect(result.success).toBe(true);
     expect(result.error).toBeUndefined();
   });

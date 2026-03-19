@@ -32,11 +32,7 @@ import type {
   TransitionCompleteState,
   TransitionTypeName,
 } from './types';
-import {
-  TransitionPhase,
-  TransitionType,
-  assertValidTransitionPhaseChange,
-} from './types';
+import { TransitionPhase, TransitionType, assertValidTransitionPhaseChange } from './types';
 
 // ─── Listener Type ───────────────────────────────────────────────────
 
@@ -50,10 +46,7 @@ export class TransitionStateMachine {
   private _defaultDurationMs: number;
   private _defaultType: TransitionTypeName;
 
-  constructor(
-    durationMs: number = 300,
-    type: TransitionTypeName = TransitionType.Fade,
-  ) {
+  constructor(durationMs: number = 300, type: TransitionTypeName = TransitionType.Fade) {
     assert(durationMs >= 0, `Duration must be non-negative, got ${durationMs}`);
     this._defaultDurationMs = durationMs;
     this._defaultType = type;
@@ -135,10 +128,7 @@ export class TransitionStateMachine {
       animationType?: TransitionTypeName;
     },
   ): void {
-    assert(
-      toUrl.length > 0,
-      'toUrl must be non-empty',
-    );
+    assert(toUrl.length > 0, 'toUrl must be non-empty');
 
     // If already transitioning, force-complete first
     if (this._state.phase === TransitionPhase.Transitioning) {
@@ -159,7 +149,11 @@ export class TransitionStateMachine {
     if (durationMs === 0 || animationType === TransitionType.None) {
       // Go through transitioning → complete immediately
       const transitioning = createTransitionTransitioningState(
-        fromUrl, toUrl, animationType, 1.0, durationMs,
+        fromUrl,
+        toUrl,
+        animationType,
+        1.0,
+        durationMs,
       );
       assertValidTransitionPhaseChange(this._state.phase, transitioning.phase);
       this._state = transitioning;
@@ -173,7 +167,11 @@ export class TransitionStateMachine {
     }
 
     const newState = createTransitionTransitioningState(
-      fromUrl, toUrl, animationType, 0, durationMs,
+      fromUrl,
+      toUrl,
+      animationType,
+      0,
+      durationMs,
     );
     assertValidTransitionPhaseChange(this._state.phase, newState.phase);
     this._state = newState;
@@ -218,9 +216,7 @@ export class TransitionStateMachine {
     }
 
     const elapsed = currentTime - this._state.startedAt;
-    const progress = this._state.durationMs > 0
-      ? elapsed / this._state.durationMs
-      : 1.0;
+    const progress = this._state.durationMs > 0 ? elapsed / this._state.durationMs : 1.0;
 
     this.tick(progress);
   }
@@ -320,9 +316,7 @@ export function createTransitionTransitioningState(
   };
 }
 
-export function createTransitionCompleteState(
-  url: string,
-): TransitionCompleteState {
+export function createTransitionCompleteState(url: string): TransitionCompleteState {
   return {
     phase: TransitionPhase.Complete,
     url,

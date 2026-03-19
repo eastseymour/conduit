@@ -76,7 +76,13 @@ function validateLoginSelectors(
   validateSelector(selectors.usernameInput, `${p}.usernameInput`, true, errors, warnings);
   validateSelector(selectors.passwordInput, `${p}.passwordInput`, true, errors, warnings);
   validateSelector(selectors.submitButton, `${p}.submitButton`, true, errors, warnings);
-  validateSelector(selectors.rememberMeCheckbox, `${p}.rememberMeCheckbox`, false, errors, warnings);
+  validateSelector(
+    selectors.rememberMeCheckbox,
+    `${p}.rememberMeCheckbox`,
+    false,
+    errors,
+    warnings,
+  );
   validateSelector(selectors.errorMessage, `${p}.errorMessage`, false, errors, warnings);
 }
 
@@ -89,8 +95,13 @@ function validateMfaSelectors(
 ): void {
   const p = 'selectors.mfa';
   const fields: (keyof MfaSelectors)[] = [
-    'codeInput', 'submitButton', 'securityQuestionText', 'securityQuestionInput',
-    'resendCodeButton', 'alternateMethodLink', 'promptContainer',
+    'codeInput',
+    'submitButton',
+    'securityQuestionText',
+    'securityQuestionInput',
+    'resendCodeButton',
+    'alternateMethodLink',
+    'promptContainer',
   ];
   for (const field of fields) {
     if (selectors[field] !== undefined && !isNonEmptyString(selectors[field])) {
@@ -126,21 +137,29 @@ function validateTransactionTableSelectors(
   validateSelector(selectors.transactionsList, `${p}.transactionsList`, true, errors, warnings);
   validateSelector(selectors.transactionRow, `${p}.transactionRow`, true, errors, warnings);
   validateSelector(selectors.transactionDate, `${p}.transactionDate`, true, errors, warnings);
-  validateSelector(selectors.transactionDescription, `${p}.transactionDescription`, true, errors, warnings);
+  validateSelector(
+    selectors.transactionDescription,
+    `${p}.transactionDescription`,
+    true,
+    errors,
+    warnings,
+  );
   validateSelector(selectors.transactionAmount, `${p}.transactionAmount`, true, errors, warnings);
   validateSelector(selectors.transactionStatus, `${p}.transactionStatus`, false, errors, warnings);
-  validateSelector(selectors.transactionCategory, `${p}.transactionCategory`, false, errors, warnings);
+  validateSelector(
+    selectors.transactionCategory,
+    `${p}.transactionCategory`,
+    false,
+    errors,
+    warnings,
+  );
   validateSelector(selectors.loadMoreButton, `${p}.loadMoreButton`, false, errors, warnings);
   validateSelector(selectors.dateRangeFilter, `${p}.dateRangeFilter`, false, errors, warnings);
 }
 
 // ─── Selectors ───────────────────────────────────────────────────────
 
-function validateSelectors(
-  selectors: BankSelectors,
-  errors: string[],
-  warnings: string[],
-): void {
+function validateSelectors(selectors: BankSelectors, errors: string[], warnings: string[]): void {
   if (!selectors.login) {
     errors.push('selectors.login is required');
     return;
@@ -159,11 +178,7 @@ function validateSelectors(
 
 // ─── MFA Detector ────────────────────────────────────────────────────
 
-function validateMfaDetector(
-  detector: MfaDetector,
-  errors: string[],
-  warnings: string[],
-): void {
+function validateMfaDetector(detector: MfaDetector, errors: string[], warnings: string[]): void {
   if (!detector.rules || detector.rules.length === 0) {
     errors.push('mfaDetector.rules must contain at least one detection rule');
     return;

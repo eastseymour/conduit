@@ -4,13 +4,20 @@
 
 import { MessageBridge, BRIDGE_INJECTION_SCRIPT } from '../src/core/MessageBridge';
 import type { WebViewRef } from '../src/types/bridge';
-import { InboundMessageType, OutboundMessageType, resetMessageCounter, generateMessageId } from '../src/types';
+import {
+  InboundMessageType,
+  OutboundMessageType,
+  resetMessageCounter,
+  generateMessageId,
+} from '../src/types';
 
 function createMockWebViewRef(): WebViewRef & { injectedScripts: string[] } {
   const injectedScripts: string[] = [];
   return {
     injectedScripts,
-    injectJavaScript: jest.fn((script: string) => { injectedScripts.push(script); }),
+    injectJavaScript: jest.fn((script: string) => {
+      injectedScripts.push(script);
+    }),
     reload: jest.fn(),
     goBack: jest.fn(),
     goForward: jest.fn(),
@@ -28,7 +35,9 @@ describe('MessageBridge', () => {
     resetMessageCounter();
   });
 
-  afterEach(() => { bridge.dispose(); });
+  afterEach(() => {
+    bridge.dispose();
+  });
 
   describe('connection', () => {
     it('starts disconnected', () => {
@@ -54,7 +63,9 @@ describe('MessageBridge', () => {
 
   describe('sendMessage', () => {
     it('rejects when no WebView ref is set', async () => {
-      await expect(bridge.sendMessage({ type: OutboundMessageType.GetCookies })).rejects.toThrow('WebView ref not set');
+      await expect(bridge.sendMessage({ type: OutboundMessageType.GetCookies })).rejects.toThrow(
+        'WebView ref not set',
+      );
     });
 
     it('injects JavaScript into WebView', () => {
@@ -75,7 +86,9 @@ describe('MessageBridge', () => {
 
   describe('sendOneWay', () => {
     it('throws when no ref set', () => {
-      expect(() => bridge.sendOneWay({ type: OutboundMessageType.GetCookies })).toThrow('WebView ref not set');
+      expect(() => bridge.sendOneWay({ type: OutboundMessageType.GetCookies })).toThrow(
+        'WebView ref not set',
+      );
     });
 
     it('does not track pending requests', () => {
@@ -89,9 +102,14 @@ describe('MessageBridge', () => {
     it('dispatches valid JSON to handlers', () => {
       const handler = jest.fn();
       bridge.onMessage(handler);
-      bridge.handleInboundMessage(JSON.stringify({
-        type: InboundMessageType.ConsoleLog, messageId: 'msg-1', level: 'log', args: ['hello'],
-      }));
+      bridge.handleInboundMessage(
+        JSON.stringify({
+          type: InboundMessageType.ConsoleLog,
+          messageId: 'msg-1',
+          level: 'log',
+          args: ['hello'],
+        }),
+      );
       expect(handler).toHaveBeenCalled();
     });
 
@@ -112,12 +130,17 @@ describe('MessageBridge', () => {
     it('resolves pending request on matching response', async () => {
       bridge.setWebViewRef(mockRef);
       const promise = bridge.sendMessage<{ type: string; cookies: unknown[] }>({
-        type: OutboundMessageType.GetCookies, messageId: 'req-1',
+        type: OutboundMessageType.GetCookies,
+        messageId: 'req-1',
       });
-      bridge.handleInboundMessage(JSON.stringify({
-        type: InboundMessageType.CookiesResult, messageId: 'resp-1', requestId: 'req-1',
-        cookies: [{ name: 'session', value: 'abc' }],
-      }));
+      bridge.handleInboundMessage(
+        JSON.stringify({
+          type: InboundMessageType.CookiesResult,
+          messageId: 'resp-1',
+          requestId: 'req-1',
+          cookies: [{ name: 'session', value: 'abc' }],
+        }),
+      );
       const result = await promise;
       expect(result.cookies).toEqual([{ name: 'session', value: 'abc' }]);
     });
@@ -125,24 +148,40 @@ describe('MessageBridge', () => {
     it('rejects on ScriptError', async () => {
       bridge.setWebViewRef(mockRef);
       const promise = bridge.sendMessage({
-        type: OutboundMessageType.InjectScript, messageId: 'req-2', script: 'fail',
+        type: OutboundMessageType.InjectScript,
+        messageId: 'req-2',
+        script: 'fail',
       });
-      bridge.handleInboundMessage(JSON.stringify({
-        type: InboundMessageType.ScriptError, messageId: 'resp-2', requestId: 'req-2', error: 'fail',
-      }));
+      bridge.handleInboundMessage(
+        JSON.stringify({
+          type: InboundMessageType.ScriptError,
+          messageId: 'resp-2',
+          requestId: 'req-2',
+          error: 'fail',
+        }),
+      );
       await expect(promise).rejects.toThrow('Script error: fail');
     });
 
     it('rejects on ElementTimeout', async () => {
       bridge.setWebViewRef(mockRef);
       const promise = bridge.sendMessage({
-        type: OutboundMessageType.WaitForElement, messageId: 'req-3',
-        selector: '#missing', timeoutMs: 1000, pollIntervalMs: 100,
+        type: OutboundMessageType.WaitForElement,
+        messageId: 'req-3',
+        selector: '#missing',
+        timeoutMs: 1000,
+        pollIntervalMs: 100,
       });
-      bridge.handleInboundMessage(JSON.stringify({
-        type: InboundMessageType.ElementTimeout, messageId: 'resp-3', requestId: 'req-3',
-        selector: '#missing', found: false, elapsedMs: 1000,
-      }));
+      bridge.handleInboundMessage(
+        JSON.stringify({
+          type: InboundMessageType.ElementTimeout,
+          messageId: 'resp-3',
+          requestId: 'req-3',
+          selector: '#missing',
+          found: false,
+          elapsedMs: 1000,
+        }),
+      );
       await expect(promise).rejects.toThrow('Element not found: #missing after 1000ms');
     });
   });
@@ -151,7 +190,9 @@ describe('MessageBridge', () => {
     it('rejects after timeout', async () => {
       const b = new MessageBridge({ defaultTimeoutMs: 50, debug: false });
       b.setWebViewRef(mockRef);
-      await expect(b.sendMessage({ type: OutboundMessageType.GetCookies })).rejects.toThrow(/timeout/i);
+      await expect(b.sendMessage({ type: OutboundMessageType.GetCookies })).rejects.toThrow(
+        /timeout/i,
+      );
       b.dispose();
     });
   });
@@ -161,20 +202,32 @@ describe('MessageBridge', () => {
       const handler = jest.fn();
       const unsub = bridge.onMessage(handler);
       unsub();
-      bridge.handleInboundMessage(JSON.stringify({
-        type: InboundMessageType.ConsoleLog, messageId: 'msg-1', level: 'log', args: [],
-      }));
+      bridge.handleInboundMessage(
+        JSON.stringify({
+          type: InboundMessageType.ConsoleLog,
+          messageId: 'msg-1',
+          level: 'log',
+          args: [],
+        }),
+      );
       expect(handler).not.toHaveBeenCalled();
     });
 
     it('survives handler errors', () => {
-      const bad = jest.fn(() => { throw new Error('crash'); });
+      const bad = jest.fn(() => {
+        throw new Error('crash');
+      });
       const good = jest.fn();
       bridge.onMessage(bad);
       bridge.onMessage(good);
-      bridge.handleInboundMessage(JSON.stringify({
-        type: InboundMessageType.ConsoleLog, messageId: 'msg-1', level: 'log', args: [],
-      }));
+      bridge.handleInboundMessage(
+        JSON.stringify({
+          type: InboundMessageType.ConsoleLog,
+          messageId: 'msg-1',
+          level: 'log',
+          args: [],
+        }),
+      );
       expect(bad).toHaveBeenCalled();
       expect(good).toHaveBeenCalled();
     });

@@ -21,8 +21,7 @@ export const NavigationPhase = {
   Error: 'error',
 } as const;
 
-export type NavigationPhaseName =
-  (typeof NavigationPhase)[keyof typeof NavigationPhase];
+export type NavigationPhaseName = (typeof NavigationPhase)[keyof typeof NavigationPhase];
 
 // ─── State Variants (Discriminated Union) ──────────────────────────
 
@@ -120,10 +119,7 @@ export interface NavigationError {
  * complete   → idle, navigating (new navigation)
  * error      → idle, navigating (retry)
  */
-const VALID_TRANSITIONS: Record<
-  NavigationPhaseName,
-  readonly NavigationPhaseName[]
-> = {
+const VALID_TRANSITIONS: Record<NavigationPhaseName, readonly NavigationPhaseName[]> = {
   [NavigationPhase.Idle]: [NavigationPhase.Navigating],
   [NavigationPhase.Navigating]: [NavigationPhase.Loaded, NavigationPhase.Error],
   [NavigationPhase.Loaded]: [
@@ -131,14 +127,8 @@ const VALID_TRANSITIONS: Record<
     NavigationPhase.Extracting,
     NavigationPhase.Error,
   ],
-  [NavigationPhase.Extracting]: [
-    NavigationPhase.Complete,
-    NavigationPhase.Error,
-  ],
-  [NavigationPhase.Complete]: [
-    NavigationPhase.Idle,
-    NavigationPhase.Navigating,
-  ],
+  [NavigationPhase.Extracting]: [NavigationPhase.Complete, NavigationPhase.Error],
+  [NavigationPhase.Complete]: [NavigationPhase.Idle, NavigationPhase.Navigating],
   [NavigationPhase.Error]: [NavigationPhase.Idle, NavigationPhase.Navigating],
 } as const;
 
@@ -148,10 +138,7 @@ const VALID_TRANSITIONS: Record<
  * @precondition from and to must be valid NavigationPhaseName values
  * @postcondition returns true iff the transition from → to is in the state machine graph
  */
-export function isValidTransition(
-  from: NavigationPhaseName,
-  to: NavigationPhaseName,
-): boolean {
+export function isValidTransition(from: NavigationPhaseName, to: NavigationPhaseName): boolean {
   const allowed = VALID_TRANSITIONS[from];
   return allowed.includes(to);
 }
@@ -160,10 +147,7 @@ export function isValidTransition(
  * Asserts a state transition is valid, throwing if not.
  * Use at transition boundaries to enforce the state machine invariant.
  */
-export function assertValidTransition(
-  from: NavigationPhaseName,
-  to: NavigationPhaseName,
-): void {
+export function assertValidTransition(from: NavigationPhaseName, to: NavigationPhaseName): void {
   if (!isValidTransition(from, to)) {
     throw new Error(
       `Invalid state transition: ${from} → ${to}. ` +
@@ -204,10 +188,7 @@ export function createLoadedState(
   };
 }
 
-export function createExtractingState(
-  url: string,
-  loadedAt: number,
-): ExtractingState {
+export function createExtractingState(url: string, loadedAt: number): ExtractingState {
   return {
     phase: NavigationPhase.Extracting,
     url,
@@ -216,10 +197,7 @@ export function createExtractingState(
   };
 }
 
-export function createCompleteState(
-  url: string,
-  startedAt: number,
-): CompleteState {
+export function createCompleteState(url: string, startedAt: number): CompleteState {
   const now = Date.now();
   return {
     phase: NavigationPhase.Complete,

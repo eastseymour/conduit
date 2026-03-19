@@ -35,15 +35,9 @@ export function resolvePreviewProps(props: ConduitPreviewProps): {
   };
 }
 
-export function getPreviewRenderInfo(
-  props: ConduitPreviewProps,
-): PreviewRenderInfo {
+export function getPreviewRenderInfo(props: ConduitPreviewProps): PreviewRenderInfo {
   const resolved = resolvePreviewProps(props);
-  return computePreviewRenderInfo(
-    resolved.state,
-    resolved.showCaption,
-    resolved.showProgress,
-  );
+  return computePreviewRenderInfo(resolved.state, resolved.showCaption, resolved.showProgress);
 }
 
 export interface ReactLike {
@@ -54,9 +48,7 @@ export interface ReactLike {
   ): unknown;
 }
 
-export function createConduitPreview(
-  React: ReactLike,
-): (props: ConduitPreviewProps) => unknown {
+export function createConduitPreview(React: ReactLike): (props: ConduitPreviewProps) => unknown {
   return function ConduitPreview(props: ConduitPreviewProps): unknown {
     const resolved = resolvePreviewProps(props);
     const renderInfo = computePreviewRenderInfo(
@@ -78,21 +70,15 @@ export function createConduitPreview(
     const children: unknown[] = [];
 
     if (renderInfo.showSpinner) {
-      children.push(
-        React.createElement('div', { key: 'spinner', 'aria-label': 'Loading' }),
-      );
+      children.push(React.createElement('div', { key: 'spinner', 'aria-label': 'Loading' }));
     }
 
     if (renderInfo.showSuccess) {
-      children.push(
-        React.createElement('div', { key: 'success', 'aria-label': 'Success' }),
-      );
+      children.push(React.createElement('div', { key: 'success', 'aria-label': 'Success' }));
     }
 
     if (renderInfo.showError) {
-      children.push(
-        React.createElement('div', { key: 'error', 'aria-label': 'Error' }),
-      );
+      children.push(React.createElement('div', { key: 'error', 'aria-label': 'Error' }));
     }
 
     if (renderInfo.progressPercent !== null) {
@@ -114,9 +100,7 @@ export function createConduitPreview(
     }
 
     if (renderInfo.caption) {
-      children.push(
-        React.createElement('div', { key: 'caption' }, renderInfo.caption),
-      );
+      children.push(React.createElement('div', { key: 'caption' }, renderInfo.caption));
     }
 
     const containerProps: Record<string, unknown> = {
