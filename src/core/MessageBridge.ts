@@ -253,8 +253,14 @@ export class MessageBridge {
         type: fullMessage.type as OutboundMessageTypeName,
         sentAt: Date.now(),
         timeoutMs: timeout,
-        resolve: (value: T) => { clearTimeout(timer); resolve(value); },
-        reject: (error: Error) => { clearTimeout(timer); reject(error); },
+        resolve: (value: T) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        reject: (error: Error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
       };
 
       this.pendingRequests.set(messageId, pendingRequest as PendingRequest);
@@ -264,9 +270,7 @@ export class MessageBridge {
     });
   }
 
-  sendOneWay(
-    message: { type: string; messageId?: string; [key: string]: unknown },
-  ): void {
+  sendOneWay(message: { type: string; messageId?: string; [key: string]: unknown }): void {
     if (!this.webViewRef) {
       throw new Error('WebView ref not set — cannot send message');
     }
@@ -286,9 +290,8 @@ export class MessageBridge {
 
     if (!message.type) return;
 
-    const requestId = 'requestId' in message
-      ? (message as { requestId?: string }).requestId
-      : undefined;
+    const requestId =
+      'requestId' in message ? (message as { requestId?: string }).requestId : undefined;
 
     if (requestId) {
       const pending = this.pendingRequests.get(requestId);
@@ -307,13 +310,19 @@ export class MessageBridge {
     }
 
     for (const handler of this.handlers) {
-      try { handler(message); } catch { /* handler errors must not break the bridge */ }
+      try {
+        handler(message);
+      } catch {
+        /* handler errors must not break the bridge */
+      }
     }
   }
 
   onMessage(handler: InboundMessageHandler): () => void {
     this.handlers.add(handler);
-    return () => { this.handlers.delete(handler); };
+    return () => {
+      this.handlers.delete(handler);
+    };
   }
 
   dispose(): void {

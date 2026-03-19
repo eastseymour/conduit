@@ -35,9 +35,7 @@ export class CookieManager {
     this.pruneExpired();
     const all = Array.from(this.cookies.values());
     if (domain) {
-      return all.filter(
-        (c) => !c.domain || c.domain === domain || domain.endsWith(`.${c.domain}`),
-      );
+      return all.filter((c) => !c.domain || c.domain === domain || domain.endsWith(`.${c.domain}`));
     }
     return all;
   }
@@ -77,7 +75,9 @@ export class CookieManager {
         await this.setCookies(cookies);
         this.pruneExpired();
       }
-    } catch { /* invalid data */ }
+    } catch {
+      /* invalid data */
+    }
   }
 
   getCookieCount(): number {

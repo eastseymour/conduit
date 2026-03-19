@@ -35,8 +35,7 @@ export const InboundMessageType = {
   PageError: 'PAGE_ERROR',
 } as const;
 
-export type InboundMessageTypeName =
-  (typeof InboundMessageType)[keyof typeof InboundMessageType];
+export type InboundMessageTypeName = (typeof InboundMessageType)[keyof typeof InboundMessageType];
 
 // ─── Outbound Message Variants ─────────────────────────────────────
 

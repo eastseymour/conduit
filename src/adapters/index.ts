@@ -26,11 +26,7 @@ export type {
 } from './types';
 
 // Registry
-export {
-  BankAdapterRegistry,
-  AdapterRegistrationError,
-  createDefaultRegistry,
-} from './registry';
+export { BankAdapterRegistry, AdapterRegistrationError, createDefaultRegistry } from './registry';
 
 // Validation
 export {

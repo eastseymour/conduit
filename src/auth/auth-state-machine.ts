@@ -8,12 +8,7 @@
  * 4. Invalid transitions throw ConduitAuthError with INVALID_STATE_TRANSITION code
  */
 
-import {
-  AuthState,
-  AuthEvent,
-  VALID_TRANSITIONS,
-  ConduitAuthError,
-} from './types';
+import { AuthState, AuthEvent, VALID_TRANSITIONS, ConduitAuthError } from './types';
 
 export type StateChangeListener = (event: AuthEvent) => void;
 
@@ -28,10 +23,7 @@ export class AuthStateMachine {
    */
   constructor(sessionId: string) {
     if (!sessionId || sessionId.trim().length === 0) {
-      throw new ConduitAuthError(
-        'Session ID must be non-empty',
-        'INVALID_STATE_TRANSITION',
-      );
+      throw new ConduitAuthError('Session ID must be non-empty', 'INVALID_STATE_TRANSITION');
     }
     this._sessionId = sessionId;
     this._state = 'idle';

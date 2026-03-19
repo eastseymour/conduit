@@ -1,5 +1,10 @@
 import { AuthStateMachine } from '../../src/auth/auth-state-machine';
-import { ConduitAuthError, VALID_TRANSITIONS, AuthState, AuthEvent } from '../../src/auth/types';
+import {
+  ConduitAuthError,
+  VALID_TRANSITIONS,
+  AuthState,
+  type AuthEvent,
+} from '../../src/auth/types';
 
 describe('AuthStateMachine', () => {
   let sm: AuthStateMachine;
@@ -300,7 +305,12 @@ describe('AuthStateMachine', () => {
 
   describe('VALID_TRANSITIONS completeness', () => {
     const allStates: AuthState[] = [
-      'idle', 'logging_in', 'mfa_required', 'mfa_submitting', 'authenticated', 'auth_failed',
+      'idle',
+      'logging_in',
+      'mfa_required',
+      'mfa_submitting',
+      'authenticated',
+      'auth_failed',
     ];
 
     it('should have an entry for every state', () => {
@@ -311,7 +321,7 @@ describe('AuthStateMachine', () => {
     });
 
     it('should only reference valid states in transitions', () => {
-      for (const [from, tos] of Object.entries(VALID_TRANSITIONS)) {
+      for (const [_from, tos] of Object.entries(VALID_TRANSITIONS)) {
         for (const to of tos) {
           expect(allStates).toContain(to);
         }

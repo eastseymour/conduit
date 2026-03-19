@@ -17,12 +17,7 @@
 
 import { AuthStateMachine } from './auth-state-machine';
 import type { BrowserDriver, MfaSubmitResult } from '../browser/types';
-import {
-  AuthCallbacks,
-  MfaChallenge,
-  ConduitAuthError,
-  assertValidMfaResponse,
-} from './types';
+import { AuthCallbacks, MfaChallenge, ConduitAuthError, assertValidMfaResponse } from './types';
 
 /**
  * Result of the MFA flow — discriminated union.
@@ -48,10 +43,7 @@ export class MfaHandler {
   ) {
     // Preconditions
     if (maxRetries < 1) {
-      throw new ConduitAuthError(
-        'maxRetries must be at least 1',
-        'MFA_MAX_RETRIES',
-      );
+      throw new ConduitAuthError('maxRetries must be at least 1', 'MFA_MAX_RETRIES');
     }
 
     this._stateMachine = stateMachine;
@@ -139,10 +131,12 @@ export class MfaHandler {
   ): Promise<import('./types').MfaResponse | null> {
     return new Promise<import('./types').MfaResponse | null>((resolve, reject) => {
       const timer = setTimeout(() => {
-        reject(new ConduitAuthError(
-          `MFA response timed out after ${this._mfaTimeoutMs}ms`,
-          'MFA_TIMEOUT',
-        ));
+        reject(
+          new ConduitAuthError(
+            `MFA response timed out after ${this._mfaTimeoutMs}ms`,
+            'MFA_TIMEOUT',
+          ),
+        );
       }, this._mfaTimeoutMs);
 
       this._callbacks

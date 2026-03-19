@@ -135,10 +135,7 @@ export class AuthModule {
    */
   async cancel(): Promise<void> {
     if (!this._activeSession || !this._stateMachine) {
-      throw new ConduitAuthError(
-        'No active auth flow to cancel',
-        'INVALID_STATE_TRANSITION',
-      );
+      throw new ConduitAuthError('No active auth flow to cancel', 'INVALID_STATE_TRANSITION');
     }
 
     // Try to transition to auth_failed if possible
@@ -251,11 +248,7 @@ export class AuthModule {
     return result;
   }
 
-  private _handleLocked(
-    sm: AuthStateMachine,
-    reason: string,
-    retryAfter?: Date,
-  ): AuthResult {
+  private _handleLocked(sm: AuthStateMachine, reason: string, retryAfter?: Date): AuthResult {
     sm.transition('auth_failed', { reason, isLocked: true });
 
     const result: AuthResult = { status: 'locked', reason, retryAfter };
@@ -274,10 +267,7 @@ export class AuthModule {
   ): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
-        reject(new ConduitAuthError(
-          `Operation timed out after ${timeoutMs}ms`,
-          errorCode,
-        ));
+        reject(new ConduitAuthError(`Operation timed out after ${timeoutMs}ms`, errorCode));
       }, timeoutMs);
 
       fn()

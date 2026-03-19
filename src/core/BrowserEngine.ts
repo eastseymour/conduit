@@ -141,27 +141,47 @@ export class BrowserEngine {
 
   // ─── Public Getters ────────────────────────────────────────────
 
-  get state(): NavigationState { return this._state; }
-  get phase(): NavigationState['phase'] { return this._state.phase; }
-  get isDisposed(): boolean { return this._disposed; }
-  get isBusy(): boolean {
-    return this._state.phase === NavigationPhase.Navigating ||
-           this._state.phase === NavigationPhase.Extracting;
+  get state(): NavigationState {
+    return this._state;
   }
-  get config(): Readonly<Required<BrowserEngineConfig>> { return this._config; }
-  get bridge(): MessageBridge { return this._bridge; }
-  get cookieManager(): CookieManager { return this._cookieManager; }
+  get phase(): NavigationState['phase'] {
+    return this._state.phase;
+  }
+  get isDisposed(): boolean {
+    return this._disposed;
+  }
+  get isBusy(): boolean {
+    return (
+      this._state.phase === NavigationPhase.Navigating ||
+      this._state.phase === NavigationPhase.Extracting
+    );
+  }
+  get config(): Readonly<Required<BrowserEngineConfig>> {
+    return this._config;
+  }
+  get bridge(): MessageBridge {
+    return this._bridge;
+  }
+  get cookieManager(): CookieManager {
+    return this._cookieManager;
+  }
 
   // ─── Event System ──────────────────────────────────────────────
 
   on(listener: BrowserEngineEventListener): () => void {
     this._listeners.add(listener);
-    return () => { this._listeners.delete(listener); };
+    return () => {
+      this._listeners.delete(listener);
+    };
   }
 
   private _emit(event: BrowserEngineEvent): void {
     for (const listener of this._listeners) {
-      try { listener(event); } catch { /* must not break engine */ }
+      try {
+        listener(event);
+      } catch {
+        /* must not break engine */
+      }
     }
   }
 
@@ -207,7 +227,14 @@ export class BrowserEngine {
         url,
       };
       this._transitionToError(error, url);
-      return { success: false, url, statusCode: null, redirectChain: [], durationMs: 0, error: error.message };
+      return {
+        success: false,
+        url,
+        statusCode: null,
+        redirectChain: [],
+        durationMs: 0,
+        error: error.message,
+      };
     }
 
     if (this._state.phase === NavigationPhase.Navigating) {
@@ -219,10 +246,12 @@ export class BrowserEngine {
     this._redirectChain = [];
     this._navigationStartedAt = Date.now();
 
-    if (this._state.phase === NavigationPhase.Idle ||
-        this._state.phase === NavigationPhase.Complete ||
-        this._state.phase === NavigationPhase.Error ||
-        this._state.phase === NavigationPhase.Loaded) {
+    if (
+      this._state.phase === NavigationPhase.Idle ||
+      this._state.phase === NavigationPhase.Complete ||
+      this._state.phase === NavigationPhase.Error ||
+      this._state.phase === NavigationPhase.Loaded
+    ) {
       this._transitionTo(createNavigatingState(url));
     } else if (this._state.phase === NavigationPhase.Navigating) {
       this._state = createNavigatingState(url);
@@ -241,7 +270,9 @@ export class BrowserEngine {
         };
         this._transitionToError(error, url);
         resolve({
-          success: false, url, statusCode: null,
+          success: false,
+          url,
+          statusCode: null,
           redirectChain: [...this._redirectChain],
           durationMs: Date.now() - this._navigationStartedAt,
           error: error.message,
@@ -262,7 +293,9 @@ export class BrowserEngine {
       const resolve = this._navigationResolve;
       this._navigationResolve = null;
       resolve({
-        success: true, url, statusCode,
+        success: true,
+        url,
+        statusCode,
         redirectChain: [...this._redirectChain],
         durationMs: Date.now() - this._navigationStartedAt,
       });
@@ -273,7 +306,9 @@ export class BrowserEngine {
     if (this._disposed) return;
     this._redirectChain.push(newUrl);
     if (this._state.phase === NavigationPhase.Loaded) {
-      this._transitionTo(createNavigatingState(newUrl, [...this._state.redirectChain, this._state.url]));
+      this._transitionTo(
+        createNavigatingState(newUrl, [...this._state.redirectChain, this._state.url]),
+      );
     }
   }
 
@@ -287,19 +322,23 @@ export class BrowserEngine {
   handleLoadError(errorCode: number, description: string, url: string): void {
     if (this._disposed) return;
     this._clearNavigationTimer();
-    const isSSL = description.toLowerCase().includes('ssl') ||
-                  description.toLowerCase().includes('certificate') ||
-                  errorCode === -1202;
+    const isSSL =
+      description.toLowerCase().includes('ssl') ||
+      description.toLowerCase().includes('certificate') ||
+      errorCode === -1202;
     const error: NavigationError = {
       code: isSSL ? NavigationErrorCode.SSLError : NavigationErrorCode.LoadFailed,
-      message: description, url,
+      message: description,
+      url,
     };
     this._transitionToError(error, url);
     if (this._navigationResolve) {
       const resolve = this._navigationResolve;
       this._navigationResolve = null;
       resolve({
-        success: false, url, statusCode: null,
+        success: false,
+        url,
+        statusCode: null,
         redirectChain: [...this._redirectChain],
         durationMs: Date.now() - this._navigationStartedAt,
         error: description,
@@ -316,7 +355,9 @@ export class BrowserEngine {
       const resolve = this._navigationResolve;
       this._navigationResolve = null;
       resolve({
-        success: true, url, statusCode,
+        success: true,
+        url,
+        statusCode,
         redirectChain: [...this._redirectChain],
         durationMs: Date.now() - this._navigationStartedAt,
       });
@@ -325,7 +366,10 @@ export class BrowserEngine {
 
   // ─── JavaScript Injection ──────────────────────────────────────
 
-  async injectJavaScript<T = unknown>(script: string, timeoutMs?: number): Promise<ScriptResult<T>> {
+  async injectJavaScript<T = unknown>(
+    script: string,
+    timeoutMs?: number,
+  ): Promise<ScriptResult<T>> {
     this._assertPageLoaded('injectJavaScript');
     try {
       const response = await this._bridge.sendMessage<ScriptResultMessage>(
@@ -338,7 +382,10 @@ export class BrowserEngine {
     }
   }
 
-  async evalExpression<T = unknown>(expression: string, timeoutMs?: number): Promise<ScriptResult<T>> {
+  async evalExpression<T = unknown>(
+    expression: string,
+    timeoutMs?: number,
+  ): Promise<ScriptResult<T>> {
     this._assertPageLoaded('evalExpression');
     try {
       const response = await this._bridge.sendMessage<ScriptResultMessage>(
@@ -382,7 +429,9 @@ export class BrowserEngine {
   beginExtraction(): void {
     this._assertNotDisposed();
     if (this._state.phase !== NavigationPhase.Loaded) {
-      throw new Error(`Cannot begin extraction in phase '${this._state.phase}'. Expected 'loaded'.`);
+      throw new Error(
+        `Cannot begin extraction in phase '${this._state.phase}'. Expected 'loaded'.`,
+      );
     }
     this._transitionTo(createExtractingState(this._state.url, this._state.loadedAt));
   }
@@ -390,34 +439,53 @@ export class BrowserEngine {
   completeExtraction(): void {
     this._assertNotDisposed();
     if (this._state.phase !== NavigationPhase.Extracting) {
-      throw new Error(`Cannot complete extraction in phase '${this._state.phase}'. Expected 'extracting'.`);
+      throw new Error(
+        `Cannot complete extraction in phase '${this._state.phase}'. Expected 'extracting'.`,
+      );
     }
     this._transitionTo(createCompleteState(this._state.url, this._state.extractionStartedAt));
   }
 
   // ─── Wait Utilities ────────────────────────────────────────────
 
-  async waitForElement(selector: string, timeoutMs?: number, pollIntervalMs?: number): Promise<boolean> {
+  async waitForElement(
+    selector: string,
+    timeoutMs?: number,
+    pollIntervalMs?: number,
+  ): Promise<boolean> {
     this._assertPageLoaded('waitForElement');
     const timeout = timeoutMs ?? this._config.elementWaitTimeoutMs;
     const interval = pollIntervalMs ?? this._config.pollIntervalMs;
     try {
       await this._bridge.sendMessage(
-        { type: OutboundMessageType.WaitForElement, selector, timeoutMs: timeout, pollIntervalMs: interval },
+        {
+          type: OutboundMessageType.WaitForElement,
+          selector,
+          timeoutMs: timeout,
+          pollIntervalMs: interval,
+        },
         timeout + 1000,
       );
       return true;
-    } catch { return false; }
+    } catch {
+      return false;
+    }
   }
 
   waitForNavigation(timeoutMs?: number): Promise<boolean> {
     const timeout = timeoutMs ?? this._config.defaultTimeoutMs;
     if (this._state.phase === NavigationPhase.Loaded) return Promise.resolve(true);
     return new Promise<boolean>((resolve) => {
-      const timer = setTimeout(() => { unsubscribe(); resolve(false); }, timeout);
+      const timer = setTimeout(() => {
+        unsubscribe();
+        resolve(false);
+      }, timeout);
       const unsubscribe = this.on((event) => {
-        if (event.type === 'stateChange' &&
-            (event.state.phase === NavigationPhase.Loaded || event.state.phase === NavigationPhase.Error)) {
+        if (
+          event.type === 'stateChange' &&
+          (event.state.phase === NavigationPhase.Loaded ||
+            event.state.phase === NavigationPhase.Error)
+        ) {
           clearTimeout(timer);
           unsubscribe();
           resolve(event.state.phase === NavigationPhase.Loaded);
@@ -444,20 +512,26 @@ export class BrowserEngine {
     this._assertPageLoaded('getCookies');
     try {
       const response = await this._bridge.sendMessage<CookiesResultMessage>(
-        { type: OutboundMessageType.GetCookies }, this._config.jsTimeoutMs,
+        { type: OutboundMessageType.GetCookies },
+        this._config.jsTimeoutMs,
       );
       return response.cookies;
-    } catch { return []; }
+    } catch {
+      return [];
+    }
   }
 
   async setCookies(cookies: readonly CookieData[]): Promise<boolean> {
     this._assertPageLoaded('setCookies');
     try {
       await this._bridge.sendMessage(
-        { type: OutboundMessageType.SetCookies, cookies }, this._config.jsTimeoutMs,
+        { type: OutboundMessageType.SetCookies, cookies },
+        this._config.jsTimeoutMs,
       );
       return true;
-    } catch { return false; }
+    } catch {
+      return false;
+    }
   }
 
   async persistCurrentCookies(): Promise<void> {
@@ -485,7 +559,10 @@ export class BrowserEngine {
     this._bridge.cancelPendingRequests();
     this._redirectChain = [];
     this._navigationResolve = null;
-    if (this._state.phase === NavigationPhase.Complete || this._state.phase === NavigationPhase.Error) {
+    if (
+      this._state.phase === NavigationPhase.Complete ||
+      this._state.phase === NavigationPhase.Error
+    ) {
       this._transitionTo(createIdleState());
     } else {
       this._state = createIdleState();
@@ -508,13 +585,19 @@ export class BrowserEngine {
   }
 
   private _assertValidUrl(url: string): void {
-    try { new URL(url); } catch { throw new Error(`Invalid URL: ${url}`); }
+    try {
+      new URL(url);
+    } catch {
+      throw new Error(`Invalid URL: ${url}`);
+    }
   }
 
   private _assertPageLoaded(operation: string): void {
     this._assertNotDisposed();
     const loadedPhases: NavigationPhaseName[] = [
-      NavigationPhase.Loaded, NavigationPhase.Extracting, NavigationPhase.Complete,
+      NavigationPhase.Loaded,
+      NavigationPhase.Extracting,
+      NavigationPhase.Complete,
     ];
     if (!loadedPhases.includes(this._state.phase)) {
       throw new Error(
@@ -541,7 +624,10 @@ export class BrowserEngine {
   }
 
   private _clearNavigationTimer(): void {
-    if (this._navigationTimer) { clearTimeout(this._navigationTimer); this._navigationTimer = null; }
+    if (this._navigationTimer) {
+      clearTimeout(this._navigationTimer);
+      this._navigationTimer = null;
+    }
   }
 
   private _sleep(ms: number): Promise<void> {

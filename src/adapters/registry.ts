@@ -8,11 +8,7 @@
  * 4. Search results are sorted alphabetically by bank name
  */
 
-import type {
-  BankAdapterConfig,
-  BankAdapterSummary,
-  AdapterSearchOptions,
-} from './types';
+import type { BankAdapterConfig, BankAdapterSummary, AdapterSearchOptions } from './types';
 import { validateBankAdapterConfig } from './validation';
 
 /**
@@ -116,13 +112,15 @@ export class BankAdapterRegistry {
 
   private getSortedSummaries(): BankAdapterSummary[] {
     return Array.from(this.adapters.values())
-      .map((config): BankAdapterSummary => ({
-        bankId: config.bankId,
-        name: config.name,
-        logoUrl: config.logoUrl,
-        supportsAccounts: config.extractors.accounts !== undefined,
-        supportsTransactions: config.extractors.transactions !== undefined,
-      }))
+      .map(
+        (config): BankAdapterSummary => ({
+          bankId: config.bankId,
+          name: config.name,
+          logoUrl: config.logoUrl,
+          supportsAccounts: config.extractors.accounts !== undefined,
+          supportsTransactions: config.extractors.transactions !== undefined,
+        }),
+      )
       .sort((a, b) => a.name.localeCompare(b.name));
   }
 }
@@ -131,9 +129,16 @@ export class BankAdapterRegistry {
  * Create a pre-populated registry with the built-in bank adapters.
  */
 export function createDefaultRegistry(): BankAdapterRegistry {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { chaseAdapter } = require('./banks/chase') as { chaseAdapter: BankAdapterConfig };
-  const { bankOfAmericaAdapter } = require('./banks/bank-of-america') as { bankOfAmericaAdapter: BankAdapterConfig };
-  const { wellsFargoAdapter } = require('./banks/wells-fargo') as { wellsFargoAdapter: BankAdapterConfig };
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { bankOfAmericaAdapter } = require('./banks/bank-of-america') as {
+    bankOfAmericaAdapter: BankAdapterConfig;
+  };
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { wellsFargoAdapter } = require('./banks/wells-fargo') as {
+    wellsFargoAdapter: BankAdapterConfig;
+  };
 
   const registry = new BankAdapterRegistry();
   registry.register(chaseAdapter);
