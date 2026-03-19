@@ -23,7 +23,15 @@ npm run clean         # Remove dist/
 ```
 src/
 ├── adapters/                # Bank-specific adapter implementations (per-bank automation)
-│   └── .gitkeep
+│   ├── banks/               # Built-in bank adapter configurations
+│   │   ├── bank-of-america.ts
+│   │   ├── chase.ts
+│   │   ├── index.ts         # Barrel export for built-in adapters
+│   │   └── wells-fargo.ts
+│   ├── index.ts             # Public API re-exports
+│   ├── registry.ts          # BankAdapterRegistry — plugin registration with duplicate/conflict detection
+│   ├── types.ts             # Adapter types: selectors, extractors, MFA detection, config
+│   └── validation.ts        # Config validation with detailed error messages
 ├── auth/                    # Bank authentication module
 │   ├── types.ts             # All auth types (discriminated unions, error types, validation)
 │   ├── auth-state-machine.ts # State machine enforcing valid auth transitions
@@ -43,7 +51,11 @@ src/
 │   ├── navigation.ts        # Navigation state machine (discriminated union, transitions)
 │   ├── bridge.ts            # WebView message types (inbound/outbound), WebViewRef, CookieData
 │   └── index.ts             # Barrel export
+├── sdk/                     # High-level SDK types for host app integration
+│   ├── types.ts             # PreviewState, PreviewStatus — host-facing preview state
+│   └── index.ts             # Barrel export
 ├── ui/                      # Preview UI components (browser preview, status captions)
+│   ├── BankSelector.ts      # Searchable bank list controller (headless, framework-agnostic)
 │   ├── ConduitPreview.ts    # React component factory for bank browser preview
 │   ├── types.ts             # UI component types (ConduitPreviewProps, PreviewRenderInfo)
 │   ├── preview/             # Visual browser preview module (CDT-4)
@@ -61,7 +73,13 @@ tests/
 │   ├── auth-state-machine.test.ts # State machine transition tests
 │   ├── auth-module.test.ts        # Integration tests with mock browser
 │   └── mfa-handler.test.ts        # MFA flow tests
+├── adapters/
+│   ├── banks.test.ts              # Built-in adapter config tests (Chase, BofA, Wells Fargo)
+│   ├── registry.test.ts           # Registry registration, lookup, search, conflict detection
+│   ├── types.test.ts              # Adapter type construction and validation
+│   └── validation.test.ts         # Config validation: selectors, extractors, MFA rules
 ├── ui/
+│   ├── BankSelector.test.ts       # Bank selector controller: search, filter, selection state
 │   └── preview/
 │       ├── types.test.ts                      # Preview types, factories, validation tests
 │       ├── browser-preview-controller.test.ts # Controller lifecycle, events, render info tests
@@ -89,6 +107,25 @@ tests/
 - **BankAdapter** — interface for per-bank automation (authenticate → getAccounts → getTransactions → cleanup)
 - **ConduitConfig** — SDK configuration with validation (assertValidConfig)
 - **LinkSession** — discriminated union tracking user-facing flow (created → institution_selected → authenticating → extracting → succeeded/failed/cancelled)
+
+### Bank Adapter Framework (CDT-7)
+
+The adapter system provides a pluggable architecture for bank-specific automation:
+
+- **BankAdapterConfig** — declares selectors, extractors, and MFA detection rules for a bank
+- **BankAdapterRegistry** — plugin registry with `register()`, `get()`, `search()`, and `listAll()`. Enforces unique bank IDs and detects URL conflicts at registration time.
+- **Validation** — `validateBankAdapterConfig()` returns structured `AdapterValidationResult` with field-level errors; `assertValidBankAdapterConfig()` throws on invalid config
+- **Built-in adapters** — Chase, Bank of America, Wells Fargo (in `src/adapters/banks/`)
+- **BankSelectors** — CSS selectors for login fields, MFA prompts, account pages, transaction tables
+- **BankExtractors** — `FieldExtractor` with `selector`, `attribute`, optional `transform` for extracting structured data from bank pages
+- **MfaDetector** — URL patterns + CSS selectors to detect MFA challenge type (sms, email, security_question, push)
+
+### Bank Selector UI
+
+`BankSelectorController` is a headless, framework-agnostic controller for bank selection:
+- Wraps `BankAdapterRegistry` to provide searchable, filterable bank listing
+- Manages selection state with automatic deselection when filtered bank is no longer visible
+- Listener-based state updates (no React dependency)
 
 ### Auth State Flow
 ```
@@ -198,15 +235,22 @@ None required for the SDK itself. Browser driver implementations may need enviro
 18. `dispose()` cancels all pending requests and clears all handlers
 19. Expired cookies are automatically pruned on access — never returned to callers
 
+### Bank Adapter Framework
+20. Bank adapter IDs are unique within a registry — duplicate registration throws `AdapterRegistrationError`
+21. URL conflict detection: two adapters cannot claim the same `loginUrl` — enforced at registration
+22. `BankAdapterConfig` validation is comprehensive: requires non-empty selectors, valid extractor fields, and at least one MFA detection rule
+23. `BankSelectorController.filteredBanks` is always a subset of `allBanks`
+24. Selected bank is cleared when it's no longer in the filtered results
+
 ### Visual Browser Preview
-20. `BrowserPreviewController` must be disposed before the engine it's attached to — `dispose()` detaches automatically
-21. Transition state follows `idle → transitioning → complete → idle` — enforced via `assertValidTransitionPhaseChange()`
-22. Starting a new transition while already transitioning force-completes the previous transition first
-23. Zero-duration or `TransitionType.None` transitions complete instantly (no transitioning state)
-24. Sensitive field masking is idempotent — elements are marked with `PROCESSED_ATTR`, style element checked by ID
-25. `resolveDimension()` for percentage type returns `Math.round(value / 100 * containerSize)`
-26. Negative blur radius is clamped to 0
-27. Empty or whitespace-only selectors are filtered out before script generation
-28. `parseMaskingResult()` never throws — always returns a valid `SensitiveFieldMaskResult`
-29. `BrowserPreviewConfig` validation requires: width/height > 0, blurRadius ≥ 0, transitionDuration ≥ 0, at least one field rule
-30. Events are emitted synchronously — listeners execute in registration order
+25. `BrowserPreviewController` must be disposed before the engine it's attached to — `dispose()` detaches automatically
+26. Transition state follows `idle → transitioning → complete → idle` — enforced via `assertValidTransitionPhaseChange()`
+27. Starting a new transition while already transitioning force-completes the previous transition first
+28. Zero-duration or `TransitionType.None` transitions complete instantly (no transitioning state)
+29. Sensitive field masking is idempotent — elements are marked with `PROCESSED_ATTR`, style element checked by ID
+30. `resolveDimension()` for percentage type returns `Math.round(value / 100 * containerSize)`
+31. Negative blur radius is clamped to 0
+32. Empty or whitespace-only selectors are filtered out before script generation
+33. `parseMaskingResult()` never throws — always returns a valid `SensitiveFieldMaskResult`
+34. `BrowserPreviewConfig` validation requires: width/height > 0, blurRadius ≥ 0, transitionDuration ≥ 0, at least one field rule
+35. Events are emitted synchronously — listeners execute in registration order
