@@ -61,6 +61,8 @@ src/
 │   ├── preview/             # Visual browser preview module (CDT-4)
 │   │   ├── types.ts         # Preview types: dimensions, positions, transitions, masking config
 │   │   ├── browser-preview-controller.ts  # Headless controller orchestrating preview state
+│   │   ├── browser-preview-component.ts   # React component factory for live browser preview
+│   │   ├── style-utilities.ts             # CSS style computation (scaling, positioning, transitions)
 │   │   ├── sensitive-field-masker.ts      # JS injection for blurring sensitive fields
 │   │   ├── transition-state-machine.ts    # Page transition animation state machine
 │   │   └── index.ts         # Barrel exports
@@ -80,11 +82,15 @@ tests/
 │   └── validation.test.ts         # Config validation: selectors, extractors, MFA rules
 ├── ui/
 │   ├── BankSelector.test.ts       # Bank selector controller: search, filter, selection state
+│   ├── ConduitPreview.test.ts     # ConduitPreview component factory tests
 │   └── preview/
 │       ├── types.test.ts                      # Preview types, factories, validation tests
 │       ├── browser-preview-controller.test.ts # Controller lifecycle, events, render info tests
+│       ├── browser-preview-component.test.ts  # BrowserPreview React factory tests
+│       ├── style-utilities.test.ts            # CSS scaling, positioning, dimension tests
 │       ├── sensitive-field-masker.test.ts      # Script generation and result parsing tests
-│       └── transition-state-machine.test.ts   # Transition state machine lifecycle tests
+│       ├── transition-state-machine.test.ts   # Transition state machine lifecycle tests
+│       └── integration.test.ts                # End-to-end preview flow tests
 ├── conduit-types.test.ts          # Account, Transaction, BankAdapter, Config, LinkSession tests
 ├── navigation.test.ts             # Navigation state machine transition tests
 ├── MessageBridge.test.ts          # Bridge communication tests
@@ -157,10 +163,25 @@ The preview system renders a miniaturized view of the WebView during bank automa
 
 Key components:
 - **BrowserPreviewController** — orchestrates expand/collapse, visibility, position, page transitions, and sensitive field masking. Attaches to `BrowserEngine` for navigation events.
+- **BrowserPreview Component** — `createBrowserPreview(React)` factory produces a React component from controller state. Includes WebView slot, toggle button, loading overlay, status label, and mask indicator.
+- **Style Utilities** — `computePreviewStyles()` returns complete CSS for container and WebView. `computeWebViewScaleStyle()` computes CSS `transform: scale()` for thumbnail rendering. `computeContainerStyle()` maps position enums to CSS positioning.
 - **TransitionStateMachine** — `idle → transitioning → complete → idle` for page transition animations with configurable duration and type (fade, slide_left, none).
 - **Sensitive Field Masker** — generates self-contained IIFE scripts injected into WebView to blur sensitive fields (passwords, SSNs, credit cards) via CSS `filter: blur()`. Masking is idempotent (element marking with data attributes, style element ID check).
 - **Dimension system** — discriminated union: `{ type: 'pixels', value: number }` or `{ type: 'percentage', value: number }` with `resolveDimension(dim, containerSize)` resolver.
 - **ScriptInjector** interface — test seam for masking without a real WebView.
+
+#### CSS Scaling for Thumbnail Preview
+The thumbnail view uses CSS `transform: scale()` for smooth page scaling:
+- `scaleFactor` (0.0, 1.0] controls the scale — default 1.0 (native)
+- At scaleFactor 0.5 with 300x200 container: WebView is rendered at 600x400 then scaled to 300x200
+- `computeWebViewScaleStyle()` computes the transform and compensating dimensions
+- When expanded, scale is always 1.0 (native size)
+
+#### Position System
+Three configurable positions with CSS style mapping:
+- **bottom_sheet** — `position: fixed; bottom: 0; left: 0; right: 0; z-index: 1000`
+- **inline** — `position: relative; z-index: 1`
+- **modal** — `position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 9999`
 
 ### Transition State Machine
 ```
