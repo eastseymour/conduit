@@ -59,6 +59,13 @@ interface BankConfig {
     errorMessage: string;
     mfaCodeInput?: string;
     mfaSubmitButton?: string;
+    /** Selector(s) for MFA method selection / device verification pages
+     *  (e.g. "Choose one" dropdown before OTP input appears). */
+    mfaChallengePage?: string;
+    /** Selector for the MFA method dropdown/select element */
+    mfaMethodSelect?: string;
+    /** Selector for the "Next" button on the MFA method selection page */
+    mfaMethodNextButton?: string;
     successIndicator: string;
     accountsList?: string;
   };
@@ -83,6 +90,11 @@ const BANK_CONFIGS: Record<string, BankConfig> = {
       errorMessage: '.error-message, .alert-error, [data-testid="error-message"], .logon-error, .generic-error',
       mfaCodeInput: '#otpcode_input-input-field, #otpcode-input-field, input[id*="otpcode"], input[name="otpcode"]',
       mfaSubmitButton: '#log_on_to_landing_page-next, button[id*="next"], button[type="submit"]',
+      // Chase shows a "We don't recognize this device" / "Get verified" page
+      // with a method selection dropdown BEFORE the OTP code input appears.
+      mfaChallengePage: '#header-simplerAuth-702, [class*="verify"], [class*="challenge"], select[id*="otpMethod"], select[id*="delivery"], [data-testid*="verify"]',
+      mfaMethodSelect: '#otpMethod, #selectbox-container select, select[id*="delivery"], select[name*="delivery"]',
+      mfaMethodNextButton: '#requestIdentificationCode-sm, button[id*="next"], #Next',
       successIndicator: '.accounts-container, #accountTileList, .dashboard-container, .account-tile, [data-testid="account-tile"]',
       accountsList: '#accountTileList',
     },
@@ -200,7 +212,10 @@ async function probeForLoginInputs(
   try {
     const result = await page.evaluate(() => {
       // ── Visibility check that handles position:fixed ──
-      function isVisible(el: Element): boolean {
+      // NOTE: Use arrow/const functions, NOT named function declarations,
+      // because tsx/esbuild adds __name() helpers for named functions and
+      // that symbol doesn't exist inside page.evaluate().
+      const isVisible = (el: Element): boolean => {
         if (!el) return false;
         const style = window.getComputedStyle(el);
         if (style.display === 'none' || style.visibility === 'hidden') return false;
@@ -208,10 +223,10 @@ async function probeForLoginInputs(
         const rect = el.getBoundingClientRect();
         if (rect.width === 0 && rect.height === 0) return false;
         return true;
-      }
+      };
 
       // ── Recursive shadow DOM walker ──
-      function deepQueryAll(root: Document | ShadowRoot | Element, selector: string): Element[] {
+      const deepQueryAll = (root: Document | ShadowRoot | Element, selector: string): Element[] => {
         const results: Element[] = [];
         try { results.push(...Array.from(root.querySelectorAll(selector))); } catch {}
         const allEls = root.querySelectorAll('*');
@@ -221,10 +236,10 @@ async function probeForLoginInputs(
           }
         }
         return results;
-      }
+      };
 
       // Count shadow roots for diagnostics
-      function countShadowRoots(root: Document | ShadowRoot | Element): number {
+      const countShadowRoots = (root: Document | ShadowRoot | Element): number => {
         let count = 0;
         const allEls = root.querySelectorAll('*');
         for (const el of allEls) {
@@ -234,7 +249,7 @@ async function probeForLoginInputs(
           }
         }
         return count;
-      }
+      };
 
       const shadowRootCount = countShadowRoots(document);
 
@@ -304,12 +319,12 @@ async function probeForLoginInputs(
       );
 
       // Build a CSS selector for an element
-      function selectorFor(el: Element | null, fallback: string): string | null {
+      const selectorFor = (el: Element | null, fallback: string): string | null => {
         if (!el) return null;
         if (el.id) return `#${el.id}`;
         if ((el as HTMLInputElement).name) return `input[name="${(el as HTMLInputElement).name}"]`;
         return fallback;
-      }
+      };
 
       const foundUser = selectorFor(userInputFallback || null, 'input[type="text"]');
       const foundPass = selectorFor(passInput || null, 'input[type="password"]');
@@ -527,7 +542,7 @@ async function runBankSession(
           // First try normal querySelector
           if (selectors.some((s) => document.querySelector(s) !== null)) return true;
           // Then traverse shadow roots
-          function deepFind(root: Document | ShadowRoot | Element, sel: string): boolean {
+          const deepFind = (root: Document | ShadowRoot | Element, sel: string): boolean => {
             try { if (root.querySelector(sel)) return true; } catch { return false; }
             const els = root.querySelectorAll('*');
             for (const el of els) {
@@ -684,8 +699,8 @@ async function runBankSession(
     if (!formFound) {
       // Capture comprehensive diagnostic info before failing
       const pageInfo = await page.evaluate(() => {
-        // Count shadow roots
-        function countShadowRoots(root: Document | Element): number {
+        // Count shadow roots (arrow fn to avoid tsx __name helper)
+        const countShadowRoots = (root: Document | Element): number => {
           let count = 0;
           const allEls = root.querySelectorAll('*');
           for (const el of allEls) {
@@ -695,9 +710,9 @@ async function runBankSession(
             }
           }
           return count;
-        }
+        };
         // Deep count inputs (including shadow DOM)
-        function deepCount(root: Document | ShadowRoot | Element, sel: string): number {
+        const deepCount = (root: Document | ShadowRoot | Element, sel: string): number => {
           let count = 0;
           try { count += root.querySelectorAll(sel).length; } catch {}
           const els = root.querySelectorAll('*');
@@ -705,7 +720,7 @@ async function runBankSession(
             if (el.shadowRoot) count += deepCount(el.shadowRoot, sel);
           }
           return count;
-        }
+        };
         return {
           title: document.title,
           url: window.location.href,
@@ -807,16 +822,209 @@ async function runBankSession(
     }
     emitEvent(session, { type: 'status', timestamp: Date.now(), status: 'submitting' });
 
-    // Wait for page to respond
+    // Wait for page to respond — after submit, banks often do a full page
+    // navigation (Chase shows a blue transition screen for ~8-10s).
+    // First wait for the initial delay, then wait for the page to settle.
     await new Promise((r) => setTimeout(r, config.postSubmitWait ?? 3000));
+    await takeScreenshot(session);
+
+    // Wait for any post-submit navigation to complete
+    // (Chase navigates from the login page to the verification/dashboard page)
+    try {
+      await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 });
+    } catch {
+      // Navigation may have already completed during postSubmitWait, or may not happen
+    }
+    await new Promise((r) => setTimeout(r, 2000)); // Extra settle time for SPA rendering
     await takeScreenshot(session);
 
     // ── Detect outcome ──
     // After login, the page may navigate — check both
     // the main page and the login target (if in an iframe) for outcome indicators.
-    const outcomeResult = await detectOutcome(session, config, page, loginTarget);
+    let outcomeResult = await detectOutcome(session, config, page, loginTarget);
 
-    if (outcomeResult === 'mfa') {
+    // If initial detection returns 'failed', do a second round with a longer wait
+    // to handle slow page loads (Chase verification page can take 10-15s)
+    if (outcomeResult === 'failed') {
+      updateCaption(session, 'Checking for post-login page...');
+      await new Promise((r) => setTimeout(r, 5000));
+      await takeScreenshot(session);
+      outcomeResult = await detectOutcome(session, config, page, loginTarget);
+    }
+
+    if (outcomeResult === 'mfa_method_selection') {
+      // ── MFA Step 1: Method selection (e.g. Chase "We don't recognize this device") ──
+      session.status = 'mfa_required';
+      updateCaption(session, 'Device verification required — requesting MFA method...');
+
+      // Gather available MFA methods from the page
+      const mfaMethods = await page.evaluate(() => {
+        // Look for select/dropdown options
+        const selects = document.querySelectorAll('select');
+        for (const sel of selects) {
+          const opts = Array.from(sel.options)
+            .filter((o) => o.value && o.value !== '' && !o.disabled)
+            .map((o) => ({ value: o.value, label: o.textContent?.trim() || o.value }));
+          if (opts.length > 0) {
+            return { selectId: sel.id || null, options: opts };
+          }
+        }
+        // Also check iframes
+        return null;
+      }).catch(() => null);
+
+      emitEvent(session, {
+        type: 'mfa_required',
+        timestamp: Date.now(),
+        challengeType: 'method_selection',
+        methods: mfaMethods?.options || [],
+        message: 'Chase requires device verification. Select a delivery method.',
+      });
+
+      // Wait for client to provide MFA method selection (or code if they clicked "I already have a code")
+      const mfaResponse = await new Promise<{ code?: string; answer?: string; method?: string } | null>(
+        (resolve) => {
+          session.mfaResolver = resolve as any;
+          setTimeout(() => resolve(null), 5 * 60 * 1000);
+        },
+      );
+
+      if (!mfaResponse) {
+        session.status = 'cancelled';
+        updateCaption(session, 'MFA cancelled or timed out');
+        emitEvent(session, { type: 'status', timestamp: Date.now(), status: 'cancelled' });
+        return;
+      }
+
+      // If client provided a code directly (e.g. "I already have a code"), skip to code entry
+      if (mfaResponse.code) {
+        // Look for "I already have a code" link and click it
+        try {
+          const alreadyHaveCode = await page.$('a[contains="already"], a:has-text("already")');
+          if (alreadyHaveCode) await alreadyHaveCode.click();
+        } catch {}
+        // Try to find OTP input
+        await new Promise((r) => setTimeout(r, 2000));
+      } else if (mfaResponse.method) {
+        // Select the MFA method in the dropdown
+        session.status = 'submitting';
+        updateCaption(session, `Selecting verification method: ${mfaResponse.method}...`);
+
+        // Try to select from dropdown
+        if (mfaMethods?.selectId) {
+          await page.select(`#${mfaMethods.selectId}`, mfaResponse.method).catch(() => {});
+        } else if (config.selectors.mfaMethodSelect) {
+          const selectSelectors = config.selectors.mfaMethodSelect.split(',').map((s) => s.trim());
+          for (const sel of selectSelectors) {
+            try {
+              await page.select(sel, mfaResponse.method);
+              break;
+            } catch {}
+          }
+        }
+
+        await new Promise((r) => setTimeout(r, 1000));
+        await takeScreenshot(session);
+
+        // Click "Next" button
+        if (config.selectors.mfaMethodNextButton) {
+          const nextSelectors = config.selectors.mfaMethodNextButton.split(',').map((s) => s.trim());
+          for (const sel of nextSelectors) {
+            try {
+              await page.click(sel);
+              break;
+            } catch {}
+          }
+        }
+
+        await new Promise((r) => setTimeout(r, config.postSubmitWait ?? 3000));
+        await takeScreenshot(session);
+
+        // Now we should be on the code entry page — check outcome again
+        const postMethodResult = await detectOutcome(session, config, page, loginTarget);
+        if (postMethodResult === 'mfa') {
+          // Good — now on the code entry page. Ask for the code.
+          session.status = 'mfa_required';
+          updateCaption(session, 'Enter the verification code sent to your device...');
+          emitEvent(session, {
+            type: 'mfa_required',
+            timestamp: Date.now(),
+            challengeType: 'code',
+            message: 'Enter the verification code Chase sent you.',
+          });
+
+          const codeResponse = await new Promise<{ code?: string; answer?: string } | null>(
+            (resolve) => {
+              session.mfaResolver = resolve;
+              setTimeout(() => resolve(null), 5 * 60 * 1000);
+            },
+          );
+
+          if (!codeResponse?.code) {
+            session.status = 'cancelled';
+            updateCaption(session, 'MFA cancelled or timed out');
+            emitEvent(session, { type: 'status', timestamp: Date.now(), status: 'cancelled' });
+            return;
+          }
+
+          mfaResponse.code = codeResponse.code;
+        } else if (postMethodResult === 'success') {
+          session.status = 'success';
+          updateCaption(session, 'Successfully connected!');
+          emitEvent(session, { type: 'status', timestamp: Date.now(), status: 'success' });
+          await takeScreenshot(session);
+          emitEvent(session, { type: 'complete', timestamp: Date.now(), status: session.status });
+          return;
+        } else if (postMethodResult === 'mfa_method_selection') {
+          // Still on method selection — might have failed to select
+          session.status = 'failed';
+          session.error = 'Could not proceed past MFA method selection';
+          updateCaption(session, session.error);
+          emitEvent(session, { type: 'error', timestamp: Date.now(), error: session.error });
+          await takeScreenshot(session);
+          emitEvent(session, { type: 'complete', timestamp: Date.now(), status: session.status });
+          return;
+        }
+      }
+
+      // ── MFA Step 2: Submit the verification code ──
+      if (mfaResponse.code) {
+        session.status = 'submitting';
+        updateCaption(session, 'Submitting verification code...');
+
+        const mfaInput = config.selectors.mfaCodeInput;
+        const mfaTarget = page;
+        if (mfaInput) {
+          try {
+            await mfaTarget.waitForSelector(mfaInput.split(',')[0].trim(), { timeout: 10000 });
+          } catch {
+            // Try other selectors
+          }
+          await mfaTarget.click(mfaInput, { clickCount: 3 }).catch(() => {});
+          await mfaTarget.type(mfaInput, mfaResponse.code, {
+            delay: config.typeDelay ?? 50,
+          });
+        }
+        if (config.selectors.mfaSubmitButton) {
+          await mfaTarget.click(config.selectors.mfaSubmitButton).catch(() => {});
+        }
+
+        await new Promise((r) => setTimeout(r, config.postSubmitWait ?? 3000));
+        await takeScreenshot(session);
+
+        const postCodeResult = await detectOutcome(session, config, page, loginTarget);
+        if (postCodeResult === 'success') {
+          session.status = 'success';
+          updateCaption(session, 'Successfully connected!');
+          emitEvent(session, { type: 'status', timestamp: Date.now(), status: 'success' });
+        } else {
+          session.status = 'failed';
+          session.error = 'Authentication failed after MFA code entry';
+          updateCaption(session, session.error);
+          emitEvent(session, { type: 'error', timestamp: Date.now(), error: session.error });
+        }
+      }
+    } else if (outcomeResult === 'mfa') {
       session.status = 'mfa_required';
       updateCaption(session, 'Multi-factor authentication required...');
       emitEvent(session, {
@@ -906,20 +1114,86 @@ async function detectOutcome(
   config: BankConfig,
   page: Page,
   loginTarget?: Page | Frame,
-): Promise<'success' | 'mfa' | 'failed'> {
+): Promise<'success' | 'mfa' | 'mfa_method_selection' | 'failed'> {
   // Check both the main page and login target (if different) for selectors
   const targets: Array<Page | Frame> = [page];
   if (loginTarget && loginTarget !== page) targets.push(loginTarget);
 
   // For comma-separated selectors, try each individual selector
-  function checkSelector(selectorList: string, label: string) {
+  function checkSelector(selectorList: string, label: string, timeoutMs = 8000) {
     const selectors = selectorList.split(',').map((s) => s.trim());
     const attempts = targets.flatMap((t) =>
       selectors.map((s) =>
-        t.waitForSelector(s, { timeout: 5000 }).then(() => label),
+        t.waitForSelector(s, { timeout: timeoutMs }).then(() => label),
       ),
     );
     return Promise.any(attempts).catch(() => null);
+  }
+
+  // Also do a text-based check for MFA/verification pages
+  // (Chase says "We don't recognize this device" / "Get verified")
+  // Check ALL frames — after login, Chase may render the verification page
+  // in a frame or the main page depending on the SPA navigation.
+  async function checkPageTextForMfa(): Promise<string | null> {
+    const mfaPatterns = [
+      /we don.?t recognize this device/i,
+      /get verified/i,
+      /verify your identity/i,
+      /how should we get in touch/i,
+      /confirm it.?s you/i,
+      /additional verification/i,
+      /choose.*delivery method/i,
+      /send.*verification code/i,
+    ];
+
+    // Check main page
+    try {
+      const bodyText = await page.evaluate(() => document.body?.innerText || '');
+      emitEvent(session, {
+        type: 'debug_text_check',
+        timestamp: Date.now(),
+        target: 'main_page',
+        url: page.url(),
+        textLength: bodyText.length,
+        textSnippet: bodyText.substring(0, 300),
+      });
+      if (mfaPatterns.some((p) => p.test(bodyText))) {
+        return 'mfa_text';
+      }
+    } catch (err) {
+      emitEvent(session, {
+        type: 'debug_text_check_error',
+        timestamp: Date.now(),
+        target: 'main_page',
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
+    // Check all frames too
+    try {
+      const frames = page.frames();
+      for (const frame of frames) {
+        try {
+          const frameText = await frame.evaluate(() => document.body?.innerText || '');
+          if (frameText.length > 10 && mfaPatterns.some((p) => p.test(frameText))) {
+            emitEvent(session, {
+              type: 'debug_text_check',
+              timestamp: Date.now(),
+              target: 'frame',
+              url: frame.url(),
+              textSnippet: frameText.substring(0, 300),
+              matched: true,
+            });
+            return 'mfa_text';
+          }
+        } catch {
+          // Frame might be cross-origin
+        }
+      }
+    } catch {
+      // best-effort
+    }
+    return null;
   }
 
   const checks = [
@@ -927,14 +1201,20 @@ async function detectOutcome(
     config.selectors.mfaCodeInput
       ? checkSelector(config.selectors.mfaCodeInput, 'mfa')
       : Promise.resolve(null),
+    config.selectors.mfaChallengePage
+      ? checkSelector(config.selectors.mfaChallengePage, 'mfa_challenge')
+      : Promise.resolve(null),
     checkSelector(config.selectors.errorMessage, 'failed'),
+    checkPageTextForMfa(),
   ];
 
   const results = await Promise.all(checks);
-  // Priority: success > mfa > failed > default failed
+  // Priority: success > mfa_code > mfa_challenge > mfa_text > failed > default failed
   if (results[0] === 'success') return 'success';
   if (results[1] === 'mfa') return 'mfa';
-  if (results[2] === 'failed') return 'failed';
+  if (results[2] === 'mfa_challenge') return 'mfa_method_selection';
+  if (results[4] === 'mfa_text') return 'mfa_method_selection';
+  if (results[3] === 'failed') return 'failed';
   return 'failed';
 }
 
