@@ -58,14 +58,26 @@ else
 fi
 chown -R conduit:conduit /opt/conduit
 
-# ── 6. Install server deps ──
-echo "[6/7] Installing server dependencies..."
+# ── 6. Build SDK + demo + install server deps ──
+echo "[6/8] Building SDK..."
+cd /opt/conduit
+sudo -u conduit npm install 2>&1 | tail -5
+sudo -u conduit npm run build 2>&1 | tail -5
+echo "SDK built."
+
+echo "[7/8] Building demo app..."
+cd /opt/conduit/example
+sudo -u conduit npm install 2>&1 | tail -5
+sudo -u conduit npm run build 2>&1 | tail -5
+echo "Demo built."
+
+echo "[8/8] Installing server dependencies..."
 cd /opt/conduit/server
 sudo -u conduit npm install --production 2>&1 | tail -5
 echo "Server deps installed."
 
-# ── 7. Create and start systemd service ──
-echo "[7/7] Setting up systemd service..."
+# ── 8. Create and start systemd service ──
+echo "[8/8] Setting up systemd service..."
 cat > /etc/systemd/system/conduit-server.service << 'SVCEOF'
 [Unit]
 Description=Conduit Live Testing Server (Puppeteer)

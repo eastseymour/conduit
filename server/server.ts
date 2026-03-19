@@ -19,6 +19,7 @@
 
 import express from 'express';
 import cors from 'cors';
+import path from 'path';
 import { randomUUID } from 'crypto';
 import puppeteer, { type Browser, type Page } from 'puppeteer';
 
@@ -382,6 +383,10 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// ── Serve the built demo (same-origin avoids HTTPS mixed-content issues) ──
+const DEMO_DIR = path.resolve(__dirname, '..', 'example', 'dist');
+app.use(express.static(DEMO_DIR));
+
 // Health check
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', sessions: sessions.size, banks: Object.keys(BANK_CONFIGS) });
@@ -539,6 +544,11 @@ app.get('/api/sessions/:id', (req, res) => {
     error: session.error,
     eventCount: session.events.length,
   });
+});
+
+// ── SPA fallback — serve index.html for any non-API GET ──
+app.get('*', (_req, res) => {
+  res.sendFile(path.join(DEMO_DIR, 'index.html'));
 });
 
 // ─── Start ──────────────────────────────────────────────────────────

@@ -13,10 +13,16 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 
 // Server URLs to try, in order of preference
-const SERVER_CANDIDATES = [
-  'http://localhost:3001',                    // Local dev server
-  'http://conduit-live:3001',                 // Tailscale MagicDNS
-]
+function getServerCandidates(): string[] {
+  const candidates: string[] = []
+  // When served from the Puppeteer server itself, same-origin just works
+  if (typeof window !== 'undefined' && window.location.hostname !== 'eastseymour.github.io') {
+    candidates.push(window.location.origin)
+  }
+  candidates.push('http://localhost:3001')        // Local dev server
+  candidates.push('http://conduit-live:3001')     // Tailscale MagicDNS
+  return candidates
+}
 
 // Allow override via URL param: ?server=http://10.0.0.4:3001
 function getServerUrlFromParams(): string | null {
@@ -113,7 +119,7 @@ export function LiveTestingDemo() {
       }
 
       // Try candidates
-      for (const candidate of SERVER_CANDIDATES) {
+      for (const candidate of getServerCandidates()) {
         if (cancelled) return
         const ok = await tryServer(candidate)
         if (ok && !cancelled) {
@@ -317,7 +323,7 @@ export function LiveTestingDemo() {
         />
         <button
           onClick={() => {
-            const url = customUrl.replace(/\/+$/, '')
+            const url = (customUrl || serverUrl).replace(/\/+$/, '')
             if (url) { setServerUrl(url); setCustomUrl(''); setServerOnline(null) }
           }}
           style={{ ...sty.btn, ...sty.btnSecondary, fontSize: 12, padding: '8px 14px' }}
