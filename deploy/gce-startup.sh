@@ -1,25 +1,40 @@
 #!/bin/bash
 # Conduit Live Server — GCE Startup Script
 # Installs Node.js, Chromium deps, Tailscale, clones repo, starts server
-set -euo pipefail
+set -uo pipefail
 
 LOG="/var/log/conduit-startup.log"
 exec > >(tee -a "$LOG") 2>&1
 echo "=== Conduit startup script began at $(date) ==="
 
+# ── 0. Fix DNS (Tailscale can break resolv.conf on reboot) ──
+echo "[0] Ensuring DNS works..."
+if ! getent hosts google.com &>/dev/null; then
+  echo "DNS broken, adding Google DNS fallback..."
+  cp /etc/resolv.conf /etc/resolv.conf.bak 2>/dev/null || true
+  # Temporarily disable Tailscale DNS override and use Google DNS
+  {
+    echo "nameserver 8.8.8.8"
+    echo "nameserver 8.8.4.4"
+    grep -v '^nameserver' /etc/resolv.conf 2>/dev/null || true
+  } > /etc/resolv.conf.tmp && mv /etc/resolv.conf.tmp /etc/resolv.conf
+  echo "DNS fix applied. Testing..."
+  getent hosts google.com && echo "DNS working!" || echo "WARN: DNS still not working"
+fi
+
 # ── 1. System deps for Puppeteer/Chromium ──
-echo "[1/7] Installing system dependencies..."
-apt-get update -qq
+echo "[1/8] Installing system dependencies..."
+apt-get update -qq || true
 apt-get install -y -qq \
   ca-certificates curl gnupg git \
   libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
   libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 \
   libxrandr2 libgbm1 libpango-1.0-0 libcairo2 \
   libasound2 libxshmfence1 libx11-xcb1 libxss1 \
-  fonts-liberation libappindicator3-1 xdg-utils wget
+  fonts-liberation libappindicator3-1 xdg-utils wget || echo "WARN: apt-get install failed (deps may already be installed)"
 
 # ── 2. Node.js 20 LTS ──
-echo "[2/7] Installing Node.js 20..."
+echo "[2/8] Installing Node.js 20..."
 if ! command -v node &>/dev/null; then
   curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
   apt-get install -y -qq nodejs
@@ -27,7 +42,7 @@ fi
 echo "Node $(node -v), npm $(npm -v)"
 
 # ── 3. Tailscale ──
-echo "[3/7] Installing Tailscale..."
+echo "[3/8] Installing Tailscale..."
 if ! command -v tailscale &>/dev/null; then
   curl -fsSL https://tailscale.com/install.sh | sh
 fi
@@ -44,13 +59,13 @@ else
 fi
 
 # ── 4. Create conduit user ──
-echo "[4/7] Creating conduit user..."
+echo "[4/8] Creating conduit user..."
 if ! id conduit &>/dev/null; then
   useradd -r -m -s /bin/bash conduit
 fi
 
 # ── 5. Clone repo ──
-echo "[5/7] Cloning conduit repo..."
+echo "[5/8] Cloning conduit repo..."
 if [ ! -d /opt/conduit ]; then
   git clone https://github.com/eastseymour/conduit.git /opt/conduit
 else
