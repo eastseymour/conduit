@@ -24,6 +24,7 @@ export const chaseAdapter: BankAdapterConfig = {
       promptContainer: '.mfa-container, .verification-container',
       resendCodeButton: '.resend-code-link, [data-testid="resend-code"]',
       alternateMethodLink: '.try-another-way, [data-testid="alternate-method"]',
+      securityQuestionInput: '.security-question input, [data-testid="security-answer"]',
     },
     accountPage: {
       accountsList: '.accounts-container, #accountTileList',

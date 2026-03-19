@@ -1,0 +1,21 @@
+{
+  "name": "@conduit/live-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local Puppeteer-based backend for live bank testing",
+  "scripts": {
+    "start": "tsx server.ts",
+    "dev": "tsx watch server.ts"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.0",
+    "puppeteer": "^24.0.0",
+    "tsx": "^4.19.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.0.0"
+  }
+}

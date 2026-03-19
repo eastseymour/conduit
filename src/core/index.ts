@@ -17,3 +17,6 @@ export type { InboundMessageHandler, MessageBridgeConfig } from './MessageBridge
 
 export { CookieManager } from './CookieManager';
 export type { CookiePersistenceCallbacks } from './CookieManager';
+
+export { ConduitBrowserDriver } from './ConduitBrowserDriver';
+export type { ConduitBrowserDriverConfig } from './ConduitBrowserDriver';

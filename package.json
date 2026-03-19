@@ -26,10 +26,10 @@
   ],
   "license": "MIT",
   "peerDependencies": {
+    "expo": ">=49.0.0",
     "react": ">=18.0.0",
     "react-native": ">=0.72.0",
-    "react-native-webview": ">=13.0.0",
-    "expo": ">=49.0.0"
+    "react-native-webview": ">=13.0.0"
   },
   "peerDependenciesMeta": {
     "expo": {
@@ -48,5 +48,8 @@
     "prettier": "^3.8.1",
     "ts-jest": "^29.1.2",
     "typescript": "^5.5.0"
+  },
+  "dependencies": {
+    "jsdom": "^29.0.0"
   }
 }

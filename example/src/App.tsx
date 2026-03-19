@@ -8,6 +8,7 @@ import {
   AccountType,
 } from '@conduit/sdk'
 import type { PreviewState } from '@conduit/sdk'
+import { LiveTestingDemo } from './LiveTestingDemo'
 
 // Create the preview component using the factory
 const ConduitPreview = createConduitPreview(React) as React.FC<{
@@ -374,6 +375,7 @@ export default function App() {
           </p>
         </div>
 
+        <LiveTestingDemo />
         <PreviewDemo />
         <BankSelectorDemo />
         <StateMachineDemo />
@@ -381,7 +383,7 @@ export default function App() {
       </main>
 
       <footer style={styles.footer}>
-        <code>@conduit/sdk v0.1.0</code> — 642 tests passing — 0 ESLint errors
+        <code>@conduit/sdk v0.1.0</code> — 769 tests passing — 0 ESLint errors
       </footer>
     </div>
   )
