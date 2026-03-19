@@ -78,3 +78,23 @@ export {
   type BrowserPreviewRenderInfo,
   type ScriptInjector,
 } from './browser-preview-controller';
+
+// Style utilities
+export {
+  computeWebViewScaleStyle,
+  computeContainerStyle,
+  computePreviewStyles,
+  computeDisplayModeSize,
+  scaleCSSDimension,
+  type PreviewContainerStyle,
+  type WebViewScaleStyle,
+  type PreviewStyles,
+} from './style-utilities';
+
+// Browser preview React component
+export {
+  createBrowserPreview,
+  computeBrowserPreviewComponentInfo,
+  type BrowserPreviewComponentProps,
+  type ReactLikeForPreview,
+} from './browser-preview-component';
