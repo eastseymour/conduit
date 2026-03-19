@@ -1615,6 +1615,29 @@ async function detectOutcome(
     return null;
   }
 
+  // Text-based error check: look for error messages in all frames
+  async function checkPageTextForError(): Promise<string | null> {
+    const errorPatterns = [
+      /can.?t find that username/i,
+      /invalid.*username.*password/i,
+      /incorrect.*password/i,
+      /account.*locked/i,
+      /too many.*attempts/i,
+      /temporarily.*locked/i,
+      /sign.?in.*failed/i,
+    ];
+    const allTargets = [page, ...page.frames()];
+    for (const t of allTargets) {
+      try {
+        const text = await t.evaluate(() => document.body?.innerText || '');
+        if (text.length > 10 && errorPatterns.some((p) => p.test(text))) {
+          return 'error_text';
+        }
+      } catch {}
+    }
+    return null;
+  }
+
   const checks = [
     checkSelector(config.selectors.successIndicator, 'success'),
     config.selectors.mfaCodeInput
@@ -1625,28 +1648,64 @@ async function detectOutcome(
       : Promise.resolve(null),
     checkSelector(config.selectors.errorMessage, 'failed'),
     checkPageTextForMfa(),
+    checkPageTextForError(),
   ];
 
   const results = await Promise.all(checks);
-  // Priority: success > mfa_code > mfa_challenge > mfa_text > failed > default failed
+  // Priority: success > mfa_code > mfa_challenge > mfa_text > error_selector > error_text > default failed
   if (results[0] === 'success') return 'success';
   if (results[1] === 'mfa') return 'mfa';
   if (results[2] === 'mfa_challenge') return 'mfa_method_selection';
   if (results[4] === 'mfa_text') return 'mfa_method_selection';
   if (results[3] === 'failed') return 'failed';
+  if (results[5] === 'error_text') return 'failed';
   return 'failed';
 }
 
 async function extractErrorText(page: Page, config: BankConfig): Promise<string> {
+  // Try CSS selector on main page
   try {
     const el = await page.$(config.selectors.errorMessage);
     if (el) {
       const text = await page.evaluate((e) => e.textContent, el);
-      return text?.trim() || 'Login failed';
+      if (text?.trim()) return text.trim();
     }
-  } catch {
-    // best-effort
-  }
+  } catch {}
+
+  // Try CSS selector on all frames
+  try {
+    for (const frame of page.frames()) {
+      try {
+        const selectors = config.selectors.errorMessage.split(',').map((s) => s.trim());
+        for (const sel of selectors) {
+          const el = await frame.$(sel);
+          if (el) {
+            const text = await frame.evaluate((e) => e.textContent, el);
+            if (text?.trim()) return text.trim();
+          }
+        }
+      } catch {}
+    }
+  } catch {}
+
+  // Fallback: check all frames for error-like text
+  const errorPatterns = [
+    /(?:can.?t find|invalid|incorrect|wrong).*(?:username|password|credentials)/i,
+    /account.*(?:locked|disabled|suspended)/i,
+    /too many.*(?:attempts|tries)/i,
+  ];
+  try {
+    for (const frame of page.frames()) {
+      try {
+        const text = await frame.evaluate(() => document.body?.innerText || '');
+        for (const pattern of errorPatterns) {
+          const match = text.match(pattern);
+          if (match) return match[0];
+        }
+      } catch {}
+    }
+  } catch {}
+
   return 'Login failed';
 }
 
