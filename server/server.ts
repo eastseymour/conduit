@@ -512,7 +512,26 @@ async function runBankSession(
     updateCaption(session, `Connecting to ${config.name}...`);
     emitEvent(session, { type: 'status', timestamp: Date.now(), status: 'navigating' });
 
-    await page.goto(config.loginUrl, { waitUntil: 'networkidle2', timeout: 45000 });
+    // Navigate with networkidle2 for full page load. Chase's SPA can detach
+    // frames during navigation — catch and recover from that error.
+    try {
+      await page.goto(config.loginUrl, { waitUntil: 'networkidle2', timeout: 45000 });
+    } catch (navErr: unknown) {
+      const msg = navErr instanceof Error ? navErr.message : String(navErr);
+      if (msg.includes('frame was detached') || msg.includes('ERR_ABORTED')) {
+        // Frame detached during SPA navigation — wait for the page to settle
+        emitEvent(session, { type: 'nav_retry', timestamp: Date.now(), reason: msg });
+        await new Promise((r) => setTimeout(r, 5000));
+        // Don't retry goto — the page already loaded, the SPA just detached a frame during it
+        try {
+          await page.waitForNetworkIdle({ timeout: 15000 });
+        } catch {
+          // Network may not fully settle — continue anyway
+        }
+      } else {
+        throw navErr;
+      }
+    }
     await takeScreenshot(session);
 
     // ── Wait for login form ──
@@ -608,7 +627,23 @@ async function runBankSession(
       // Known selectors didn't match — try probing
     }
 
-    // Attempt 1b: Try Puppeteer's built-in shadow-piercing selectors
+    // Attempt 1b: Check iframes EARLY — Chase renders login form in an iframe
+    // This is faster than shadow-piercing or DOM probing and is the most
+    // common fallback for Chase.
+    if (!formFound) {
+      updateCaption(session, 'Checking iframes for login form...');
+      const frameResult = await probeFramesForLoginInputs(page, session);
+      if (frameResult) {
+        loginTarget = frameResult.frame;
+        usernameSelector = frameResult.username;
+        passwordSelector = frameResult.password;
+        submitSelector = frameResult.submit;
+        formFound = true;
+        updateCaption(session, `Found login form in iframe: ${usernameSelector}`);
+      }
+    }
+
+    // Attempt 2: Try Puppeteer's built-in shadow-piercing selectors
     // The `pierce/` prefix and `>>>` combinator traverse shadow DOMs natively
     if (!formFound) {
       updateCaption(session, 'Trying shadow-piercing selectors...');
@@ -652,7 +687,7 @@ async function runBankSession(
       }
     }
 
-    // Attempt 2: Probe the DOM for any login-like inputs
+    // Attempt 3: Probe the DOM for any login-like inputs
     if (!formFound) {
       updateCaption(session, 'Known selectors missed — probing DOM for login inputs...');
       await takeScreenshot(session);
@@ -667,32 +702,29 @@ async function runBankSession(
       }
     }
 
-    // Attempt 3: Check iframes (some banks DO use them)
-    if (!formFound) {
-      updateCaption(session, 'Checking iframes for login form...');
-      const frameResult = await probeFramesForLoginInputs(page, session);
-      if (frameResult) {
-        loginTarget = frameResult.frame;
-        usernameSelector = frameResult.username;
-        passwordSelector = frameResult.password;
-        submitSelector = frameResult.submit;
-        formFound = true;
-        updateCaption(session, `Found login form in iframe: ${usernameSelector}`);
-      }
-    }
-
     // Attempt 4: One more wait — maybe the SPA is still booting
     if (!formFound) {
       updateCaption(session, 'Waiting longer for SPA to finish loading...');
       await new Promise((r) => setTimeout(r, 10000));
       await takeScreenshot(session);
 
-      const probeResult2 = await probeForLoginInputs(page, session);
-      if (probeResult2) {
-        usernameSelector = probeResult2.username;
-        passwordSelector = probeResult2.password;
-        submitSelector = probeResult2.submit;
+      // Try iframes again after waiting
+      const frameResult2 = await probeFramesForLoginInputs(page, session);
+      if (frameResult2) {
+        loginTarget = frameResult2.frame;
+        usernameSelector = frameResult2.username;
+        passwordSelector = frameResult2.password;
+        submitSelector = frameResult2.submit;
         formFound = true;
+      }
+      if (!formFound) {
+        const probeResult2 = await probeForLoginInputs(page, session);
+        if (probeResult2) {
+          usernameSelector = probeResult2.username;
+          passwordSelector = probeResult2.password;
+          submitSelector = probeResult2.submit;
+          formFound = true;
+        }
       }
     }
 
@@ -767,9 +799,26 @@ async function runBankSession(
     session.status = 'submitting';
     updateCaption(session, 'Entering username...');
 
-    // Helper: resolve element handle — tries loginTarget.$() first, then page.$()
-    // for pierce selectors (which only work on Page, not Frame)
+    // Helper: resolve element handle with timeout — tries loginTarget.$() first,
+    // then page.$() for pierce selectors (which only work on Page, not Frame).
+    // If the loginTarget iframe was detached/recreated, re-grab the current frame.
     async function resolveElement(selector: string): Promise<Awaited<ReturnType<Page['$']>>> {
+      // Re-grab loginTarget from page.frames() in case Chase reloaded the iframe
+      // IMPORTANT: skip the main frame — we only want sub-frames (iframes)
+      if (loginTarget !== page) {
+        const currentFrames = page.frames().filter((f) => f !== page.mainFrame());
+        const currentFrame = currentFrames.find((f) => {
+          try {
+            const url = f.url();
+            // Look for the auth iframe (not the main page)
+            return url.includes('/web/auth/') && url.includes('fromOrigin');
+          } catch { return false; }
+        });
+        if (currentFrame) loginTarget = currentFrame;
+      }
+
+      emitEvent(session, { type: 'debug_resolve', timestamp: Date.now(), selector, target: loginTarget === page ? 'page' : 'frame' });
+
       let el = await loginTarget.$(selector);
       if (!el && loginTarget !== page) {
         el = await page.$(selector);
@@ -778,12 +827,14 @@ async function runBankSession(
       if (!el && selector.startsWith('pierce/')) {
         el = await page.$(selector);
       }
+      emitEvent(session, { type: 'debug_resolve_result', timestamp: Date.now(), selector, found: !!el });
       return el;
     }
 
     // Clear and type username — use evaluate to clear first for robustness
     const userEl = await resolveElement(usernameSelector);
     if (userEl) {
+      emitEvent(session, { type: 'debug_typing', timestamp: Date.now(), field: 'username', method: 'element_handle' });
       await userEl.click({ clickCount: 3 });
       await userEl.type(credentials.username, { delay: config.typeDelay ?? 50 });
     } else {
@@ -792,6 +843,7 @@ async function runBankSession(
         timestamp: Date.now(),
         message: `Could not resolve username element with selector: ${usernameSelector}`,
       });
+      // Fallback: use loginTarget.click/type with the selector string
       await loginTarget.click(usernameSelector, { clickCount: 3 });
       await loginTarget.type(usernameSelector, credentials.username, {
         delay: config.typeDelay ?? 50,
@@ -801,6 +853,7 @@ async function runBankSession(
     updateCaption(session, 'Entering password...');
     const passEl = await resolveElement(passwordSelector);
     if (passEl) {
+      emitEvent(session, { type: 'debug_typing', timestamp: Date.now(), field: 'password', method: 'element_handle' });
       await passEl.click({ clickCount: 3 });
       await passEl.type(credentials.password, { delay: config.typeDelay ?? 50 });
     } else {
@@ -823,61 +876,245 @@ async function runBankSession(
     emitEvent(session, { type: 'status', timestamp: Date.now(), status: 'submitting' });
 
     // Wait for page to respond — after submit, banks often do a full page
-    // navigation (Chase shows a blue transition screen for ~8-10s).
-    // First wait for the initial delay, then wait for the page to settle.
+    // navigation. Chase uses SPA hash-based routing inside an iframe,
+    // so page-level navigation won't fire. Instead, we poll the iframe
+    // content for outcome indicators (MFA text, success, error).
+    emitEvent(session, { type: 'debug_post_submit', timestamp: Date.now(), step: 'post_submit_wait_start' });
     await new Promise((r) => setTimeout(r, config.postSubmitWait ?? 3000));
     await takeScreenshot(session);
 
-    // Wait for any post-submit navigation to complete
-    // (Chase navigates from the login page to the verification/dashboard page)
-    try {
-      await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 });
-    } catch {
-      // Navigation may have already completed during postSubmitWait, or may not happen
-    }
-    await new Promise((r) => setTimeout(r, 2000)); // Extra settle time for SPA rendering
-    await takeScreenshot(session);
+    // Poll for outcome — check every 2s for up to 30s.
+    // Chase's SPA navigates the iframe from #/logon/logon/chaseOnline to
+    // #/logon/recognizeUser/simplerAuthOptions (MFA) or the dashboard.
+    // The main page stays at the same URL (hash-based routing in iframe).
+    let outcomeResult: 'success' | 'mfa' | 'mfa_method_selection' | 'failed' = 'failed';
+    const pollStartTime = Date.now();
+    const pollTimeoutMs = 30000;
+    const pollIntervalMs = 2000;
 
-    // ── Detect outcome ──
-    // After login, the page may navigate — check both
-    // the main page and the login target (if in an iframe) for outcome indicators.
-    let outcomeResult = await detectOutcome(session, config, page, loginTarget);
+    while (Date.now() - pollStartTime < pollTimeoutMs) {
+      // Re-grab loginTarget in case iframe was recreated
+      if (loginTarget !== page) {
+        const currentFrames = page.frames();
+        const currentFrame = currentFrames.find((f) => {
+          try { return f.url().includes('/web/auth/'); } catch { return false; }
+        });
+        if (currentFrame) loginTarget = currentFrame;
+      }
 
-    // If initial detection returns 'failed', do a second round with a longer wait
-    // to handle slow page loads (Chase verification page can take 10-15s)
-    if (outcomeResult === 'failed') {
-      updateCaption(session, 'Checking for post-login page...');
-      await new Promise((r) => setTimeout(r, 5000));
-      await takeScreenshot(session);
       outcomeResult = await detectOutcome(session, config, page, loginTarget);
+      emitEvent(session, {
+        type: 'debug_post_submit',
+        timestamp: Date.now(),
+        step: 'poll_outcome',
+        result: outcomeResult,
+        elapsedMs: Date.now() - pollStartTime,
+        frameUrl: loginTarget !== page ? (() => { try { return loginTarget.url(); } catch { return 'unknown'; } })() : undefined,
+      });
+
+      if (outcomeResult !== 'failed') {
+        break;
+      }
+
+      await new Promise((r) => setTimeout(r, pollIntervalMs));
+      await takeScreenshot(session);
     }
+    emitEvent(session, { type: 'debug_post_submit', timestamp: Date.now(), step: 'poll_done', result: outcomeResult, totalMs: Date.now() - pollStartTime });
 
     if (outcomeResult === 'mfa_method_selection') {
       // ── MFA Step 1: Method selection (e.g. Chase "We don't recognize this device") ──
       session.status = 'mfa_required';
       updateCaption(session, 'Device verification required — requesting MFA method...');
 
-      // Gather available MFA methods from the page
-      const mfaMethods = await page.evaluate(() => {
-        // Look for select/dropdown options
-        const selects = document.querySelectorAll('select');
-        for (const sel of selects) {
-          const opts = Array.from(sel.options)
-            .filter((o) => o.value && o.value !== '' && !o.disabled)
-            .map((o) => ({ value: o.value, label: o.textContent?.trim() || o.value }));
-          if (opts.length > 0) {
-            return { selectId: sel.id || null, options: opts };
-          }
+      // Gather available MFA methods from the page.
+      // Chase renders MFA inside an iframe and may use Shadow DOM for the dropdown.
+      // Strategy:
+      //   1. Try config selectors with pierce/ (Shadow DOM traversal)
+      //   2. Try native <select> elements in all frames (including Shadow DOM)
+      //   3. Try custom dropdown triggers
+      //   4. Fallback: present standard Chase MFA options
+      //
+      // Build target list: loginTarget first, then all frames
+      const mfaFrameTargets: Array<Page | Frame> = [];
+      const allFrames = page.frames().filter((f) => f !== page.mainFrame());
+      if (loginTarget && loginTarget !== page) mfaFrameTargets.push(loginTarget);
+      for (const f of allFrames) {
+        if (!mfaFrameTargets.includes(f)) mfaFrameTargets.push(f);
+      }
+      mfaFrameTargets.push(page); // main page as fallback
+
+      let mfaMethods: { type: 'native_select' | 'custom_dropdown' | 'config_pierce'; selectId: string | null; options: Array<{ value: string; label: string }> } | null = null;
+      let mfaMethodTarget: Page | Frame | null = null;
+
+      // Strategy 1: Try config selectors via pierce/ on the Page (traverses Shadow DOM)
+      if (config.selectors.mfaMethodSelect) {
+        const configSelectors = config.selectors.mfaMethodSelect.split(',').map((s) => s.trim());
+        for (const sel of configSelectors) {
+          try {
+            // Try pierce selector to traverse shadow DOM
+            const pierceEl = await page.$(`pierce/${sel.replace('#', '').startsWith('#') ? sel : sel}`);
+            if (pierceEl) {
+              // Found the select — read its options
+              const options = await page.$$eval(`pierce/${sel} option`, (opts) =>
+                opts
+                  .filter((o: any) => o.value && o.value !== '' && !o.disabled)
+                  .map((o: any) => ({ value: o.value, label: o.textContent?.trim() || o.value })),
+              ).catch(() => []);
+              if (options.length > 0) {
+                mfaMethods = { type: 'config_pierce', selectId: sel, options };
+                mfaMethodTarget = page;
+                break;
+              }
+            }
+          } catch {}
         }
-        // Also check iframes
-        return null;
-      }).catch(() => null);
+      }
+
+      // Strategy 2: Try native <select> in all frames (including Shadow DOM traversal)
+      if (!mfaMethods) {
+        for (const t of mfaFrameTargets) {
+          try {
+            const nativeResult = await t.evaluate(() => {
+              // Deep search: traverse Shadow DOM roots
+              const deepQueryAll = (root: Document | ShadowRoot | Element, selector: string): Element[] => {
+                const results: Element[] = [];
+                try { results.push(...Array.from(root.querySelectorAll(selector))); } catch {}
+                const allEls = root.querySelectorAll('*');
+                for (const el of allEls) {
+                  if (el.shadowRoot) {
+                    try { results.push(...deepQueryAll(el.shadowRoot, selector)); } catch {}
+                  }
+                }
+                return results;
+              };
+
+              const selects = deepQueryAll(document, 'select') as HTMLSelectElement[];
+              for (const sel of selects) {
+                const opts = Array.from(sel.options)
+                  .filter((o: HTMLOptionElement) => o.value && o.value !== '' && !o.disabled)
+                  .map((o: HTMLOptionElement) => ({ value: o.value, label: o.textContent?.trim() || o.value }));
+                if (opts.length > 0) {
+                  return { type: 'native_select' as const, selectId: sel.id || null, options: opts };
+                }
+              }
+              return null;
+            }).catch(() => null);
+
+            if (nativeResult) {
+              mfaMethods = nativeResult;
+              mfaMethodTarget = t;
+              break;
+            }
+          } catch {}
+        }
+      }
+
+      // Strategy 3: Try custom dropdown triggers (including Shadow DOM)
+      if (!mfaMethods) {
+        for (const t of mfaFrameTargets) {
+          try {
+            const customResult = await t.evaluate(() => {
+              // Deep search helper
+              const deepQueryAll = (root: Document | ShadowRoot | Element, selector: string): Element[] => {
+                const results: Element[] = [];
+                try { results.push(...Array.from(root.querySelectorAll(selector))); } catch {}
+                const allEls = root.querySelectorAll('*');
+                for (const el of allEls) {
+                  if (el.shadowRoot) {
+                    try { results.push(...deepQueryAll(el.shadowRoot, selector)); } catch {}
+                  }
+                }
+                return results;
+              };
+
+              const triggerSelectors = [
+                '[class*="selectbox"] [class*="trigger"]',
+                '[class*="selectbox"] [role="button"]',
+                '[role="combobox"]',
+                '[class*="select-trigger"]',
+              ];
+              let trigger: HTMLElement | null = null;
+              for (const sel of triggerSelectors) {
+                const els = deepQueryAll(document, sel);
+                if (els.length > 0) { trigger = els[0] as HTMLElement; break; }
+              }
+              // Also try finding by "Choose one" / "Tell us how" text
+              if (!trigger) {
+                const allEls = deepQueryAll(document, 'div, span, button');
+                for (const el of allEls) {
+                  const text = (el as HTMLElement).textContent?.trim();
+                  if (text === 'Choose one' || text === 'Tell us how') {
+                    trigger = el as HTMLElement;
+                    break;
+                  }
+                }
+              }
+              if (!trigger) return null;
+              trigger.click();
+              return { found: true };
+            }).catch(() => null);
+
+            if (customResult?.found) {
+              await new Promise((r) => setTimeout(r, 500));
+              const options = await t.evaluate(() => {
+                const deepQueryAll = (root: Document | ShadowRoot | Element, selector: string): Element[] => {
+                  const results: Element[] = [];
+                  try { results.push(...Array.from(root.querySelectorAll(selector))); } catch {}
+                  const allEls = root.querySelectorAll('*');
+                  for (const el of allEls) {
+                    if (el.shadowRoot) {
+                      try { results.push(...deepQueryAll(el.shadowRoot, selector)); } catch {}
+                    }
+                  }
+                  return results;
+                };
+                const results: Array<{ value: string; label: string }> = [];
+                const optionSelectors = ['[role="option"]', '[role="listbox"] li', '[class*="selectbox"] li', 'li'];
+                for (const sel of optionSelectors) {
+                  const items = deepQueryAll(document, sel);
+                  items.forEach((item) => {
+                    const text = (item as HTMLElement).textContent?.trim();
+                    if (text && text !== 'Choose one' && text !== 'Tell us how' && text !== '') {
+                      const rect = (item as HTMLElement).getBoundingClientRect();
+                      if (rect.width > 0 && rect.height > 0) {
+                        results.push({ value: (item as HTMLElement).dataset?.value || text, label: text });
+                      }
+                    }
+                  });
+                  if (results.length > 0) break;
+                }
+                return results;
+              }).catch(() => []);
+
+              if (options.length > 0) {
+                mfaMethods = { type: 'custom_dropdown', selectId: null, options };
+                mfaMethodTarget = t;
+                await takeScreenshot(session);
+                // Close dropdown
+                await t.evaluate(() => { document.body.click(); }).catch(() => {});
+                break;
+              }
+              await t.evaluate(() => { document.body.click(); }).catch(() => {});
+            }
+          } catch {}
+        }
+      }
+
+      emitEvent(session, {
+        type: 'debug_mfa_detection',
+        timestamp: Date.now(),
+        foundMethods: !!mfaMethods,
+        methodCount: mfaMethods?.options.length || 0,
+        dropdownType: mfaMethods?.type || 'none',
+        targetFrameUrl: mfaMethodTarget ? (() => { try { return (mfaMethodTarget as any).url?.(); } catch { return 'unknown'; } })() : null,
+      });
 
       emitEvent(session, {
         type: 'mfa_required',
         timestamp: Date.now(),
         challengeType: 'method_selection',
         methods: mfaMethods?.options || [],
+        dropdownType: mfaMethods?.type || 'unknown',
         message: 'Chase requires device verification. Select a delivery method.',
       });
 
@@ -898,42 +1135,152 @@ async function runBankSession(
 
       // If client provided a code directly (e.g. "I already have a code"), skip to code entry
       if (mfaResponse.code) {
-        // Look for "I already have a code" link and click it
-        try {
-          const alreadyHaveCode = await page.$('a[contains="already"], a:has-text("already")');
-          if (alreadyHaveCode) await alreadyHaveCode.click();
-        } catch {}
-        // Try to find OTP input
+        // Look for "I already have a code" link and click it — try iframe first
+        const codeTargets: Array<Page | Frame> = loginTarget !== page ? [loginTarget, page] : [page];
+        for (const t of codeTargets) {
+          try {
+            // Use evaluate to find link by text content (more reliable than CSS pseudo-selectors)
+            const clicked = await t.evaluate(() => {
+              const links = Array.from(document.querySelectorAll('a'));
+              const link = links.find((a) => a.textContent?.toLowerCase().includes('already'));
+              if (link) { link.click(); return true; }
+              return false;
+            });
+            if (clicked) break;
+          } catch {}
+        }
+        // Wait for OTP input to appear
         await new Promise((r) => setTimeout(r, 2000));
       } else if (mfaResponse.method) {
         // Select the MFA method in the dropdown
         session.status = 'submitting';
         updateCaption(session, `Selecting verification method: ${mfaResponse.method}...`);
 
-        // Try to select from dropdown
-        if (mfaMethods?.selectId) {
-          await page.select(`#${mfaMethods.selectId}`, mfaResponse.method).catch(() => {});
-        } else if (config.selectors.mfaMethodSelect) {
+        // Use the target where we found the dropdown, or fall back to loginTarget/page
+        const mfaSelectTarget = mfaMethodTarget || (loginTarget !== page ? loginTarget : page);
+        let selectDone = false;
+
+        if (mfaMethods?.type === 'config_pierce' && mfaMethods.selectId) {
+          // Use pierce selector on the Page to select in shadow DOM
+          try {
+            await page.select(`pierce/${mfaMethods.selectId}`, mfaResponse.method);
+            selectDone = true;
+          } catch {}
+          // Also try without pierce/ on each frame target
+          if (!selectDone) {
+            for (const t of mfaFrameTargets) {
+              try { await t.select(mfaMethods.selectId, mfaResponse.method); selectDone = true; break; } catch {}
+            }
+          }
+          emitEvent(session, {
+            type: 'debug_mfa_select',
+            timestamp: Date.now(),
+            dropdownType: 'config_pierce',
+            method: mfaResponse.method,
+            selectDone,
+          });
+        } else if (mfaMethods?.type === 'custom_dropdown') {
+          // Custom dropdown: click the trigger to open, then click the matching option
+          selectDone = await mfaSelectTarget.evaluate((methodLabel: string) => {
+            // Re-open the dropdown (it may have closed)
+            const triggerSelectors = [
+              '[class*="selectbox"] [class*="trigger"]',
+              '[class*="selectbox"] [role="button"]',
+              '[class*="dropdown"] [class*="trigger"]',
+              '[role="combobox"]',
+            ];
+            let trigger: HTMLElement | null = null;
+            for (const sel of triggerSelectors) {
+              const el = document.querySelector(sel) as HTMLElement;
+              if (el) { trigger = el; break; }
+            }
+            if (!trigger) {
+              const allEls = document.querySelectorAll('div, span, button');
+              for (const el of allEls) {
+                if (el.textContent?.trim() === 'Choose one' || el.textContent?.trim() === methodLabel) {
+                  trigger = el as HTMLElement;
+                  break;
+                }
+              }
+            }
+            if (trigger) trigger.click();
+
+            // Wait a tick, then find and click the option
+            return new Promise<boolean>((resolve) => {
+              setTimeout(() => {
+                const optionSelectors = [
+                  '[role="option"]',
+                  '[role="listbox"] li',
+                  '[class*="selectbox"] li',
+                  '[class*="option-list"] li',
+                  'li',
+                ];
+                for (const sel of optionSelectors) {
+                  const items = document.querySelectorAll(sel);
+                  for (const item of items) {
+                    const text = item.textContent?.trim();
+                    if (text && (text === methodLabel || text.includes(methodLabel) || methodLabel.includes(text))) {
+                      (item as HTMLElement).click();
+                      resolve(true);
+                      return;
+                    }
+                  }
+                }
+                resolve(false);
+              }, 300);
+            });
+          }, mfaResponse.method).catch(() => false);
+
+          emitEvent(session, {
+            type: 'debug_mfa_select',
+            timestamp: Date.now(),
+            dropdownType: 'custom',
+            method: mfaResponse.method,
+            selectDone,
+          });
+        }
+
+        // Fallback: try native <select> if custom dropdown didn't work
+        if (!selectDone && mfaMethods?.type === 'native_select' && mfaMethods.selectId) {
+          try { await mfaSelectTarget.select(`#${mfaMethods.selectId}`, mfaResponse.method); selectDone = true; } catch {}
+          if (!selectDone) { try { await page.select(`#${mfaMethods.selectId}`, mfaResponse.method); selectDone = true; } catch {} }
+        }
+        if (!selectDone && config.selectors.mfaMethodSelect) {
           const selectSelectors = config.selectors.mfaMethodSelect.split(',').map((s) => s.trim());
           for (const sel of selectSelectors) {
-            try {
-              await page.select(sel, mfaResponse.method);
-              break;
-            } catch {}
+            try { await mfaSelectTarget.select(sel, mfaResponse.method); selectDone = true; break; } catch {}
+            try { await page.select(sel, mfaResponse.method); selectDone = true; break; } catch {}
           }
         }
 
         await new Promise((r) => setTimeout(r, 1000));
         await takeScreenshot(session);
 
-        // Click "Next" button
+        // Click "Next" button — try mfaSelectTarget first, then all frames
+        const nextTargets = [mfaSelectTarget, ...(loginTarget !== mfaSelectTarget ? [loginTarget] : []), page].filter(Boolean);
         if (config.selectors.mfaMethodNextButton) {
           const nextSelectors = config.selectors.mfaMethodNextButton.split(',').map((s) => s.trim());
-          for (const sel of nextSelectors) {
-            try {
-              await page.click(sel);
-              break;
-            } catch {}
+          let nextClicked = false;
+          for (const t of nextTargets) {
+            for (const sel of nextSelectors) {
+              try { await t.click(sel); nextClicked = true; break; } catch {}
+            }
+            if (nextClicked) break;
+          }
+          // Also try finding by text "Next"
+          if (!nextClicked) {
+            for (const t of nextTargets) {
+              try {
+                nextClicked = await t.evaluate(() => {
+                  const buttons = document.querySelectorAll('button');
+                  for (const btn of buttons) {
+                    if (btn.textContent?.trim() === 'Next') { btn.click(); return true; }
+                  }
+                  return false;
+                });
+                if (nextClicked) break;
+              } catch {}
+            }
           }
         }
 
@@ -993,20 +1340,47 @@ async function runBankSession(
         updateCaption(session, 'Submitting verification code...');
 
         const mfaInput = config.selectors.mfaCodeInput;
-        const mfaTarget = page;
+        // Try loginTarget (iframe) first since Chase renders MFA in the iframe,
+        // then fall back to main page
+        const mfaTargets: Array<Page | Frame> = loginTarget !== page ? [loginTarget, page] : [page];
         if (mfaInput) {
-          try {
-            await mfaTarget.waitForSelector(mfaInput.split(',')[0].trim(), { timeout: 10000 });
-          } catch {
-            // Try other selectors
+          const firstSelector = mfaInput.split(',')[0].trim();
+          let inputFound = false;
+          for (const t of mfaTargets) {
+            try {
+              await t.waitForSelector(firstSelector, { timeout: 5000 });
+              await t.click(firstSelector, { clickCount: 3 });
+              await t.type(firstSelector, mfaResponse.code!, { delay: config.typeDelay ?? 50 });
+              inputFound = true;
+              // Also click submit on same target
+              if (config.selectors.mfaSubmitButton) {
+                await t.click(config.selectors.mfaSubmitButton.split(',')[0].trim()).catch(() => {});
+              }
+              break;
+            } catch {}
           }
-          await mfaTarget.click(mfaInput, { clickCount: 3 }).catch(() => {});
-          await mfaTarget.type(mfaInput, mfaResponse.code, {
-            delay: config.typeDelay ?? 50,
-          });
-        }
-        if (config.selectors.mfaSubmitButton) {
-          await mfaTarget.click(config.selectors.mfaSubmitButton).catch(() => {});
+          if (!inputFound) {
+            // Fallback: try all selectors on all targets
+            const selectors = mfaInput.split(',').map((s) => s.trim());
+            for (const t of mfaTargets) {
+              for (const sel of selectors) {
+                try {
+                  await t.click(sel, { clickCount: 3 });
+                  await t.type(sel, mfaResponse.code!, { delay: config.typeDelay ?? 50 });
+                  if (config.selectors.mfaSubmitButton) {
+                    await t.click(config.selectors.mfaSubmitButton.split(',')[0].trim()).catch(() => {});
+                  }
+                  inputFound = true;
+                  break;
+                } catch {}
+              }
+              if (inputFound) break;
+            }
+          }
+        } else if (config.selectors.mfaSubmitButton) {
+          for (const t of mfaTargets) {
+            try { await t.click(config.selectors.mfaSubmitButton.split(',')[0].trim()); break; } catch {}
+          }
         }
 
         await new Promise((r) => setTimeout(r, config.postSubmitWait ?? 3000));
@@ -1049,26 +1423,49 @@ async function runBankSession(
         return;
       }
 
-      // Submit MFA
+      // Submit MFA — try loginTarget (iframe) first, fall back to main page
       session.status = 'submitting';
       updateCaption(session, 'Submitting verification code...');
 
-      const mfaInput = config.selectors.mfaCodeInput;
-      // Try the main page first for MFA (post-login often switches away from iframes)
-      const mfaTarget = page;
-      if (mfaInput) {
-        try {
-          await mfaTarget.waitForSelector(mfaInput.split(',')[0].trim(), { timeout: 5000 });
-        } catch {
-          // MFA input might be in loginTarget if different
+      const mfaInput2 = config.selectors.mfaCodeInput;
+      const mfaTargets2: Array<Page | Frame> = loginTarget !== page ? [loginTarget, page] : [page];
+      const mfaCode2 = mfaResponse.code ?? mfaResponse.answer ?? '';
+      if (mfaInput2) {
+        const firstSel2 = mfaInput2.split(',')[0].trim();
+        let found2 = false;
+        for (const t of mfaTargets2) {
+          try {
+            await t.waitForSelector(firstSel2, { timeout: 5000 });
+            await t.click(firstSel2, { clickCount: 3 });
+            await t.type(firstSel2, mfaCode2, { delay: config.typeDelay ?? 50 });
+            if (config.selectors.mfaSubmitButton) {
+              await t.click(config.selectors.mfaSubmitButton.split(',')[0].trim()).catch(() => {});
+            }
+            found2 = true;
+            break;
+          } catch {}
         }
-        await mfaTarget.click(mfaInput, { clickCount: 3 }).catch(() => {});
-        await mfaTarget.type(mfaInput, mfaResponse.code ?? mfaResponse.answer ?? '', {
-          delay: config.typeDelay ?? 50,
-        });
-      }
-      if (config.selectors.mfaSubmitButton) {
-        await mfaTarget.click(config.selectors.mfaSubmitButton).catch(() => {});
+        if (!found2) {
+          const selectors2 = mfaInput2.split(',').map((s) => s.trim());
+          for (const t of mfaTargets2) {
+            for (const sel of selectors2) {
+              try {
+                await t.click(sel, { clickCount: 3 });
+                await t.type(sel, mfaCode2, { delay: config.typeDelay ?? 50 });
+                if (config.selectors.mfaSubmitButton) {
+                  await t.click(config.selectors.mfaSubmitButton.split(',')[0].trim()).catch(() => {});
+                }
+                found2 = true;
+                break;
+              } catch {}
+            }
+            if (found2) break;
+          }
+        }
+      } else if (config.selectors.mfaSubmitButton) {
+        for (const t of mfaTargets2) {
+          try { await t.click(config.selectors.mfaSubmitButton.split(',')[0].trim()); break; } catch {}
+        }
       }
 
       await new Promise((r) => setTimeout(r, config.postSubmitWait ?? 3000));
@@ -1101,10 +1498,12 @@ async function runBankSession(
     await takeScreenshot(session);
     emitEvent(session, { type: 'complete', timestamp: Date.now(), status: session.status });
   } catch (err) {
+    console.error('[runBankSession] Caught error:', err);
     session.status = 'failed';
     session.error = err instanceof Error ? err.message : String(err);
+    const stack = err instanceof Error ? err.stack : undefined;
     updateCaption(session, `Error: ${session.error}`);
-    emitEvent(session, { type: 'error', timestamp: Date.now(), error: session.error });
+    emitEvent(session, { type: 'error', timestamp: Date.now(), error: session.error, stack });
     await takeScreenshot(session);
   }
 }
@@ -1172,26 +1571,46 @@ async function detectOutcome(
     // Check all frames too
     try {
       const frames = page.frames();
+      emitEvent(session, {
+        type: 'debug_text_check',
+        timestamp: Date.now(),
+        target: 'frames_count',
+        count: frames.length,
+        urls: frames.map((f) => { try { return f.url(); } catch { return 'unknown'; } }),
+      });
       for (const frame of frames) {
         try {
           const frameText = await frame.evaluate(() => document.body?.innerText || '');
-          if (frameText.length > 10 && mfaPatterns.some((p) => p.test(frameText))) {
-            emitEvent(session, {
-              type: 'debug_text_check',
-              timestamp: Date.now(),
-              target: 'frame',
-              url: frame.url(),
-              textSnippet: frameText.substring(0, 300),
-              matched: true,
-            });
+          const matched = frameText.length > 10 && mfaPatterns.some((p) => p.test(frameText));
+          emitEvent(session, {
+            type: 'debug_text_check',
+            timestamp: Date.now(),
+            target: 'frame',
+            url: frame.url(),
+            textLength: frameText.length,
+            textSnippet: frameText.substring(0, 300),
+            matched,
+          });
+          if (matched) {
             return 'mfa_text';
           }
-        } catch {
-          // Frame might be cross-origin
+        } catch (frameErr) {
+          emitEvent(session, {
+            type: 'debug_text_check_error',
+            timestamp: Date.now(),
+            target: 'frame',
+            url: (() => { try { return frame.url(); } catch { return 'unknown'; } })(),
+            error: frameErr instanceof Error ? frameErr.message : String(frameErr),
+          });
         }
       }
-    } catch {
-      // best-effort
+    } catch (framesErr) {
+      emitEvent(session, {
+        type: 'debug_text_check_error',
+        timestamp: Date.now(),
+        target: 'frames_iteration',
+        error: framesErr instanceof Error ? framesErr.message : String(framesErr),
+      });
     }
     return null;
   }
