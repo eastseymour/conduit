@@ -138,6 +138,7 @@ async function getBrowser(): Promise<Browser> {
         '--disable-dev-shm-usage',
         '--disable-gpu',
         '--window-size=1280,800',
+        '--disable-blink-features=AutomationControlled',
       ],
     });
   }
@@ -194,8 +195,28 @@ async function runBankSession(
 
     await page.setViewport({ width: 1280, height: 800 });
     await page.setUserAgent(
-      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
     );
+
+    // Anti-detection: remove webdriver flag and patch navigator
+    await page.evaluateOnNewDocument(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => false });
+      // Spoof plugins (headless Chrome has none)
+      Object.defineProperty(navigator, 'plugins', {
+        get: () => [1, 2, 3, 4, 5],
+      });
+      // Spoof languages
+      Object.defineProperty(navigator, 'languages', {
+        get: () => ['en-US', 'en'],
+      });
+      // Remove Chrome automation indicators
+      // @ts-ignore
+      delete window.cdc_adoQpoasnfa76pfcZLmcfl_Array;
+      // @ts-ignore
+      delete window.cdc_adoQpoasnfa76pfcZLmcfl_Promise;
+      // @ts-ignore
+      delete window.cdc_adoQpoasnfa76pfcZLmcfl_Symbol;
+    });
 
     // ── Navigate to login page ──
     session.status = 'navigating';
