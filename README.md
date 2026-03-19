@@ -26,6 +26,14 @@ Plaid competitor — an Expo SDK that runs an embedded browser to log into banki
 - **Host app integration** — Surface MFA prompts via callbacks/events, accept MFA input from host app
 - **Login outcome detection** — Distinguish between successful login, failed login, and account locked
 
+### Bank Adapter Framework (CDT-7)
+- **Pluggable adapters** — Declare CSS selectors, extractors, and MFA rules per bank
+- **Adapter registry** — Register, search, and look up bank adapters with duplicate/conflict detection
+- **Config validation** — Detailed validation of adapter configs with field-level error messages
+- **Built-in adapters** — Chase, Bank of America, Wells Fargo pre-configured
+- **MFA detection** — URL patterns and CSS selectors to identify MFA challenge types
+- **Bank selector UI** — Headless, searchable bank list controller (framework-agnostic)
+
 ### Visual Browser Preview (CDT-4)
 - **Live browser preview** — Minimized real-time view of the bank browser as navigation happens
 - **Configurable container** — Pixel-based (e.g., 300x200) or percentage-based sizing
@@ -117,6 +125,35 @@ function handleSessionUpdate(session: LinkSession) {
 }
 ```
 
+### Bank Adapter Registry
+
+```typescript
+import {
+  BankAdapterRegistry,
+  createDefaultRegistry,
+  BankSelectorController,
+} from '@conduit/sdk';
+
+// 1. Create a registry with built-in adapters
+const registry = createDefaultRegistry();
+
+// 2. Search for banks
+const results = registry.search({ query: 'chase' });
+
+// 3. Use the bank selector UI controller
+const selector = new BankSelectorController(registry);
+selector.subscribe((state) => {
+  // state.filteredBanks — banks matching current query
+  // state.selectedBank — currently selected bank, or null
+  renderBankList(state);
+});
+selector.setQuery('wells');
+selector.select(results[0]!.id);
+
+// 4. Clean up
+selector.dispose();
+```
+
 ### Browser Preview
 
 ```typescript
@@ -159,13 +196,20 @@ preview.dispose();
 
 ```
 src/
-├── adapters/    # Bank-specific automation implementations
+├── adapters/    # Bank adapter framework — pluggable per-bank configs
+│   ├── banks/   # Built-in adapters (Chase, BofA, Wells Fargo)
+│   ├── registry.ts    # Plugin registry with conflict detection
+│   ├── types.ts       # Selectors, extractors, MFA detection rules
+│   └── validation.ts  # Config validation with field-level errors
 ├── auth/        # Authentication logic with state machine
 ├── browser/     # Abstract BrowserDriver interface
 ├── core/        # Embedded WebView engine + MessageBridge
+├── sdk/         # High-level SDK types for host app integration
 ├── types/       # Core domain types (Account, Transaction, BankAdapter, Config, LinkSession)
-└── ui/          # Preview UI components
-    └── preview/ # Visual browser preview (CDT-4): controller, transitions, masking
+└── ui/          # UI components
+    ├── BankSelector.ts  # Searchable bank list controller
+    ├── ConduitPreview.ts # React component factory for preview
+    └── preview/  # Visual browser preview (CDT-4): controller, transitions, masking
 ```
 
 ### State Machines
