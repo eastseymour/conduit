@@ -384,7 +384,10 @@ app.use(cors());
 app.use(express.json());
 
 // ── Serve the built demo (same-origin avoids HTTPS mixed-content issues) ──
+// The Vite build uses base: '/conduit/' for GitHub Pages, so we mount at both
+// '/' and '/conduit/' to support both environments.
 const DEMO_DIR = path.resolve(__dirname, '..', 'example', 'dist');
+app.use('/conduit', express.static(DEMO_DIR));
 app.use(express.static(DEMO_DIR));
 
 // Health check
@@ -544,6 +547,11 @@ app.get('/api/sessions/:id', (req, res) => {
     error: session.error,
     eventCount: session.events.length,
   });
+});
+
+// ── Root redirect to /conduit/ (matches Vite base path) ──
+app.get('/', (_req, res) => {
+  res.redirect('/conduit/');
 });
 
 // ── SPA fallback — serve index.html for any non-API GET ──
