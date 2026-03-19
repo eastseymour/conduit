@@ -66,13 +66,15 @@ fi
 
 # ── 5. Clone repo ──
 echo "[5/8] Cloning conduit repo..."
-git config --global --add safe.directory /opt/conduit
 if [ ! -d /opt/conduit ]; then
   git clone https://github.com/eastseymour/conduit.git /opt/conduit
+  chown -R conduit:conduit /opt/conduit
 else
-  cd /opt/conduit && git fetch origin main && git reset --hard origin/main
+  # Pull latest as the conduit user (avoids dubious ownership errors)
+  cd /opt/conduit
+  sudo -u conduit git fetch origin main
+  sudo -u conduit git reset --hard origin/main
 fi
-chown -R conduit:conduit /opt/conduit
 
 # ── 6. Build SDK + demo + install server deps ──
 echo "[6/8] Building SDK..."
