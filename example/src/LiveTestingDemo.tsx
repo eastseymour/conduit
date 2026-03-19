@@ -1,18 +1,38 @@
 /**
  * LiveTestingDemo — Real bank login testing via the Conduit Live Server.
  *
- * When the local server (server/) is running on localhost:3001, this component
- * enables real credential-based bank login testing with:
+ * Connects to the Conduit Puppeteer server (local or remote via Tailscale)
+ * for real credential-based bank login testing with:
  *   - Live screenshot preview of the browser session
  *   - SSE event stream with real-time status captions
  *   - MFA code submission
  *
- * When the server is not running, it shows setup instructions.
+ * Auto-discovers the server by trying multiple URLs in order.
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 
-const SERVER_URL = 'http://localhost:3001'
+// Server URLs to try, in order of preference
+const SERVER_CANDIDATES = [
+  'http://localhost:3001',                    // Local dev server
+  'http://conduit-live:3001',                 // Tailscale MagicDNS
+]
+
+// Allow override via URL param: ?server=http://10.0.0.4:3001
+function getServerUrlFromParams(): string | null {
+  try {
+    const params = new URLSearchParams(window.location.search)
+    return params.get('server')
+  } catch { return null }
+}
+
+// Persisted server URL (localStorage)
+function getSavedServerUrl(): string | null {
+  try { return localStorage.getItem('conduit-server-url') } catch { return null }
+}
+function saveServerUrl(url: string): void {
+  try { localStorage.setItem('conduit-server-url', url) } catch { /* ignore */ }
+}
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -44,6 +64,10 @@ interface SessionState {
 // ─── Component ──────────────────────────────────────────────────────
 
 export function LiveTestingDemo() {
+  const [serverUrl, setServerUrl] = useState<string>(
+    getServerUrlFromParams() || getSavedServerUrl() || ''
+  )
+  const [customUrl, setCustomUrl] = useState('')
   const [serverOnline, setServerOnline] = useState<boolean | null>(null)
   const [banks, setBanks] = useState<BankInfo[]>([])
   const [selectedBank, setSelectedBank] = useState<string>('')
@@ -61,38 +85,70 @@ export function LiveTestingDemo() {
   const eventSourceRef = useRef<EventSource | null>(null)
   const screenshotIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  // ── Check server health ──
+  // ── Auto-discover server ──
   useEffect(() => {
     let cancelled = false
-    async function check() {
+
+    async function tryServer(url: string): Promise<boolean> {
       try {
-        const res = await fetch(`${SERVER_URL}/api/health`, { signal: AbortSignal.timeout(2000) })
-        if (!cancelled && res.ok) {
-          await res.json()
-          setServerOnline(true)
-          // Fetch banks
-          const banksRes = await fetch(`${SERVER_URL}/api/banks`)
-          const banksData = await banksRes.json()
-          setBanks(banksData.banks || [])
-          if (banksData.banks?.length > 0 && !selectedBank) {
-            setSelectedBank(banksData.banks[0].bankId)
+        const res = await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(2000) })
+        return res.ok
+      } catch { return false }
+    }
+
+    async function discover() {
+      // If we already have a working URL, just check it
+      if (serverUrl) {
+        const ok = await tryServer(serverUrl)
+        if (!cancelled) {
+          if (ok) {
+            setServerOnline(true)
+            saveServerUrl(serverUrl)
+            await fetchBanks(serverUrl)
+          } else {
+            setServerOnline(false)
           }
         }
-      } catch {
-        if (!cancelled) setServerOnline(false)
+        return
       }
+
+      // Try candidates
+      for (const candidate of SERVER_CANDIDATES) {
+        if (cancelled) return
+        const ok = await tryServer(candidate)
+        if (ok && !cancelled) {
+          setServerUrl(candidate)
+          setServerOnline(true)
+          saveServerUrl(candidate)
+          await fetchBanks(candidate)
+          return
+        }
+      }
+      if (!cancelled) setServerOnline(false)
     }
-    check()
-    const interval = setInterval(check, 5000)
+
+    async function fetchBanks(url: string) {
+      try {
+        const res = await fetch(`${url}/api/banks`)
+        const data = await res.json()
+        setBanks(data.banks || [])
+        if (data.banks?.length > 0 && !selectedBank) {
+          setSelectedBank(data.banks[0].bankId)
+        }
+      } catch { /* ignore */ }
+    }
+
+    discover()
+    const interval = setInterval(discover, 5000)
     return () => { cancelled = true; clearInterval(interval) }
-  }, [])
+  }, [serverUrl])
 
   // ── Screenshot polling ──
   useEffect(() => {
     if (session.sessionId && !['idle', 'success', 'failed', 'cancelled'].includes(session.status)) {
       screenshotIntervalRef.current = setInterval(async () => {
         try {
-          const res = await fetch(`${SERVER_URL}/api/sessions/${session.sessionId}/screenshot`)
+          const res = await fetch(`${serverUrl}/api/sessions/${session.sessionId}/screenshot`)
           if (res.ok) {
             const blob = await res.blob()
             const url = URL.createObjectURL(blob)
@@ -116,7 +172,7 @@ export function LiveTestingDemo() {
     setScreenshotUrl(null)
 
     try {
-      const res = await fetch(`${SERVER_URL}/api/sessions`, {
+      const res = await fetch(`${serverUrl}/api/sessions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ bankId: selectedBank, username, password }),
@@ -132,7 +188,7 @@ export function LiveTestingDemo() {
       setSession(s => ({ ...s, sessionId: data.sessionId, status: 'navigating', caption: 'Session started' }))
 
       // Connect SSE
-      const evtSource = new EventSource(`${SERVER_URL}/api/sessions/${data.sessionId}/events`)
+      const evtSource = new EventSource(`${serverUrl}/api/sessions/${data.sessionId}/events`)
       eventSourceRef.current = evtSource
 
       evtSource.onmessage = (e) => {
@@ -186,7 +242,7 @@ export function LiveTestingDemo() {
     if (!session.sessionId || !mfaCode) return
 
     try {
-      await fetch(`${SERVER_URL}/api/sessions/${session.sessionId}/mfa`, {
+      await fetch(`${serverUrl}/api/sessions/${session.sessionId}/mfa`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code: mfaCode }),
@@ -201,7 +257,7 @@ export function LiveTestingDemo() {
   const cancelSession = useCallback(async () => {
     if (!session.sessionId) return
     try {
-      await fetch(`${SERVER_URL}/api/sessions/${session.sessionId}/cancel`, { method: 'POST' })
+      await fetch(`${serverUrl}/api/sessions/${session.sessionId}/cancel`, { method: 'POST' })
     } catch {
       // ignore
     }
@@ -236,7 +292,7 @@ export function LiveTestingDemo() {
         <span style={{ color: '#d9534f' }}>LIVE</span> Bank Testing
       </h2>
       <p style={sty.sectionDesc}>
-        Test real bank logins with actual credentials. Requires the local Puppeteer server.
+        Test real bank logins with actual credentials via Puppeteer server (local or Tailscale).
       </p>
 
       {/* Server Status */}
@@ -245,30 +301,41 @@ export function LiveTestingDemo() {
           ...sty.dot,
           backgroundColor: serverOnline ? '#4caf50' : serverOnline === false ? '#f44336' : '#aaa',
         }} />
-        {serverOnline === null && 'Checking server...'}
-        {serverOnline === true && 'Live server connected (localhost:3001)'}
-        {serverOnline === false && (
-          <span>
-            Server offline —{' '}
-            <code style={{ fontSize: 12, backgroundColor: '#fff', padding: '2px 6px', borderRadius: 4 }}>
-              cd server && npm install && npm start
-            </code>
-          </span>
-        )}
+        {serverOnline === null && 'Discovering server...'}
+        {serverOnline === true && `Connected to ${serverUrl}`}
+        {serverOnline === false && 'Server not found — enter URL or start local server'}
+      </div>
+
+      {/* Server URL config */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, alignItems: 'center' }}>
+        <input
+          type="text"
+          value={customUrl || serverUrl}
+          onChange={e => setCustomUrl(e.target.value)}
+          placeholder="http://conduit-live:3001 or http://localhost:3001"
+          style={{ ...sty.input, flex: 1, fontSize: 13 }}
+        />
+        <button
+          onClick={() => {
+            const url = customUrl.replace(/\/+$/, '')
+            if (url) { setServerUrl(url); setCustomUrl(''); setServerOnline(null) }
+          }}
+          style={{ ...sty.btn, ...sty.btnSecondary, fontSize: 12, padding: '8px 14px' }}
+        >
+          Connect
+        </button>
       </div>
 
       {serverOnline === false && (
         <div style={sty.instructions}>
-          <h3 style={{ margin: '0 0 12px', fontSize: 16 }}>Setup Instructions</h3>
+          <h3 style={{ margin: '0 0 12px', fontSize: 16 }}>Connection Options</h3>
           <ol style={{ margin: 0, paddingLeft: 20, lineHeight: 2 }}>
-            <li>Open a terminal in the <code>conduit/server/</code> directory</li>
-            <li>Run <code>npm install</code> (installs Puppeteer + Express)</li>
-            <li>Run <code>npm start</code></li>
-            <li>Come back here — this panel will auto-detect the server</li>
+            <li><strong>Tailscale:</strong> Enter <code>http://conduit-live:3001</code> above (if deployed to GCP)</li>
+            <li><strong>Local:</strong> Run <code>cd server && npm install && npm start</code></li>
+            <li><strong>URL param:</strong> Add <code>?server=http://your-ip:3001</code> to the page URL</li>
           </ol>
           <p style={{ margin: '12px 0 0', fontSize: 13, color: '#888' }}>
-            The server runs Puppeteer (headless Chrome) locally. Your credentials are never stored
-            or sent to any external service.
+            Credentials are passed directly to the Puppeteer server and never stored.
           </p>
         </div>
       )}

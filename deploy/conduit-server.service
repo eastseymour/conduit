@@ -1,0 +1,19 @@
+[Unit]
+Description=Conduit Live Testing Server (Puppeteer)
+After=network.target
+
+[Service]
+Type=simple
+User=conduit
+Group=conduit
+WorkingDirectory=/opt/conduit/server
+ExecStart=/usr/bin/node --import tsx server.ts
+Restart=on-failure
+RestartSec=5
+Environment=PORT=3001
+Environment=NODE_ENV=production
+# Puppeteer needs more memory for Chrome
+Environment=NODE_OPTIONS=--max-old-space-size=2048
+
+[Install]
+WantedBy=multi-user.target
