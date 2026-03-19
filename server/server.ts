@@ -21,7 +21,7 @@ import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import { randomUUID } from 'crypto';
-import puppeteer, { type Browser, type Page } from 'puppeteer';
+import puppeteer, { type Browser, type Page, type Frame } from 'puppeteer';
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -50,6 +50,8 @@ interface BankConfig {
   bankId: string;
   name: string;
   loginUrl: string;
+  /** If the login form is inside an iframe, CSS selector to find it. */
+  loginIframeSelector?: string;
   selectors: {
     usernameInput: string;
     passwordInput: string;
@@ -71,9 +73,11 @@ const BANK_CONFIGS: Record<string, BankConfig> = {
     bankId: 'chase',
     name: 'Chase',
     loginUrl: 'https://secure.chase.com/web/auth/dashboard#/logon/existing',
+    /** Chase renders the login form inside an iframe — automation must target that frame. */
+    loginIframeSelector: 'iframe[src*="/web/auth/"]',
     selectors: {
-      usernameInput: '#userId-text-input-field',
-      passwordInput: '#password-text-input-field',
+      usernameInput: '#userId-input-field-input',
+      passwordInput: '#password-input-field-input',
       submitButton: '#signin-button',
       errorMessage: '.error-message, .alert-error, [data-testid="error-message"]',
       mfaCodeInput: '#otpcode_input-input-field',
@@ -195,10 +199,14 @@ async function runBankSession(
 
     await page.setViewport({ width: 1280, height: 800 });
 
-    // Use the real Chrome UA — Puppeteer bundles Chrome 146+, which banks accept.
-    // Previously we set a hardcoded Chrome/120 then Chrome/131 UA, which Chase
-    // rejected because the real browser version (from JS APIs) didn't match.
-    // Letting Chrome use its own UA avoids the mismatch entirely.
+    // The default UA contains "HeadlessChrome/146..." which banks detect and block.
+    // Replace it with a normal-looking Chrome UA that keeps the real version number
+    // so it passes both UA-string checks and JS API version checks.
+    const realUA = await b.userAgent();
+    const cleanUA = realUA
+      .replace('HeadlessChrome/', 'Chrome/')
+      .replace(/X11; Linux x86_64/, 'Macintosh; Intel Mac OS X 10_15_7');
+    await page.setUserAgent(cleanUA);
 
     // Anti-detection: remove webdriver flag and patch navigator
     await page.evaluateOnNewDocument(() => {
@@ -211,6 +219,9 @@ async function runBankSession(
       Object.defineProperty(navigator, 'languages', {
         get: () => ['en-US', 'en'],
       });
+      // Patch the Chrome runtime to look like a normal browser
+      // @ts-ignore
+      window.chrome = { runtime: {}, loadTimes: function() {}, csi: function() {} };
     });
 
     // ── Navigate to login page ──
@@ -221,13 +232,33 @@ async function runBankSession(
     await page.goto(config.loginUrl, { waitUntil: 'networkidle2', timeout: 30000 });
     await takeScreenshot(session);
 
-    // ── Wait for login form ──
+    // ── Wait for login form (may be in an iframe) ──
     session.status = 'login_page';
-    updateCaption(session, 'Login page loaded, entering credentials...');
+    updateCaption(session, 'Login page loaded, looking for login form...');
     emitEvent(session, { type: 'status', timestamp: Date.now(), status: 'login_page' });
 
+    // If the bank uses an iframe for the login form, find it
+    let loginFrame: Page | Frame = page;
+    if (config.loginIframeSelector) {
+      updateCaption(session, 'Waiting for login iframe...');
+      try {
+        await page.waitForSelector(config.loginIframeSelector, { timeout: 15000 });
+        const iframeHandle = await page.$(config.loginIframeSelector);
+        if (iframeHandle) {
+          const frame = await iframeHandle.contentFrame();
+          if (frame) {
+            loginFrame = frame as any;
+            // Wait for iframe content to load
+            await new Promise((r) => setTimeout(r, 3000));
+          }
+        }
+      } catch {
+        // Fall through to try the main page
+      }
+    }
+
     try {
-      await page.waitForSelector(config.selectors.usernameInput, { timeout: 15000 });
+      await loginFrame.waitForSelector(config.selectors.usernameInput, { timeout: 15000 });
     } catch {
       session.status = 'failed';
       session.error = 'Login form did not appear — page may have changed or be blocked';
@@ -244,14 +275,14 @@ async function runBankSession(
     updateCaption(session, 'Entering username...');
 
     // Clear and type username
-    await page.click(config.selectors.usernameInput, { clickCount: 3 });
-    await page.type(config.selectors.usernameInput, credentials.username, {
+    await loginFrame.click(config.selectors.usernameInput, { clickCount: 3 });
+    await loginFrame.type(config.selectors.usernameInput, credentials.username, {
       delay: config.typeDelay ?? 50,
     });
 
     updateCaption(session, 'Entering password...');
-    await page.click(config.selectors.passwordInput, { clickCount: 3 });
-    await page.type(config.selectors.passwordInput, credentials.password, {
+    await loginFrame.click(config.selectors.passwordInput, { clickCount: 3 });
+    await loginFrame.type(config.selectors.passwordInput, credentials.password, {
       delay: config.typeDelay ?? 50,
     });
 
@@ -259,7 +290,7 @@ async function runBankSession(
     updateCaption(session, 'Submitting credentials...');
 
     // ── Click submit ──
-    await page.click(config.selectors.submitButton);
+    await loginFrame.click(config.selectors.submitButton);
     emitEvent(session, { type: 'status', timestamp: Date.now(), status: 'submitting' });
 
     // Wait for page to respond
@@ -267,7 +298,9 @@ async function runBankSession(
     await takeScreenshot(session);
 
     // ── Detect outcome ──
-    const outcomeResult = await detectOutcome(session, config, page);
+    // After login, the page may navigate away from the iframe — check both
+    // the main page and the login frame for outcome indicators.
+    const outcomeResult = await detectOutcome(session, config, page, loginFrame);
 
     if (outcomeResult === 'mfa') {
       session.status = 'mfa_required';
@@ -294,25 +327,26 @@ async function runBankSession(
         return;
       }
 
-      // Submit MFA
+      // Submit MFA — try loginFrame first, fall back to page
       session.status = 'submitting';
       updateCaption(session, 'Submitting verification code...');
 
       const mfaInput = config.selectors.mfaCodeInput;
+      const mfaTarget = loginFrame;
       if (mfaInput) {
-        await page.click(mfaInput, { clickCount: 3 });
-        await page.type(mfaInput, mfaResponse.code ?? mfaResponse.answer ?? '', {
+        await mfaTarget.click(mfaInput, { clickCount: 3 });
+        await mfaTarget.type(mfaInput, mfaResponse.code ?? mfaResponse.answer ?? '', {
           delay: config.typeDelay ?? 50,
         });
       }
       if (config.selectors.mfaSubmitButton) {
-        await page.click(config.selectors.mfaSubmitButton);
+        await mfaTarget.click(config.selectors.mfaSubmitButton);
       }
 
       await new Promise((r) => setTimeout(r, config.postSubmitWait ?? 3000));
       await takeScreenshot(session);
 
-      const postMfaResult = await detectOutcome(session, config, page);
+      const postMfaResult = await detectOutcome(session, config, page, loginFrame);
       if (postMfaResult === 'success') {
         session.status = 'success';
         updateCaption(session, 'Successfully connected!');
@@ -351,25 +385,26 @@ async function detectOutcome(
   session: BankSession,
   config: BankConfig,
   page: Page,
+  loginFrame?: Page | Frame,
 ): Promise<'success' | 'mfa' | 'failed'> {
+  // Check both the main page and login frame (if different) for selectors
+  const targets: Array<Page | Frame> = [page];
+  if (loginFrame && loginFrame !== page) targets.push(loginFrame);
+
+  function checkSelector(selector: string, label: string) {
+    return Promise.any(
+      targets.map((t) =>
+        t.waitForSelector(selector, { timeout: 3000 }).then(() => label),
+      ),
+    ).catch(() => null);
+  }
+
   const checks = [
-    // Check for success
-    page
-      .waitForSelector(config.selectors.successIndicator, { timeout: 3000 })
-      .then(() => 'success' as const)
-      .catch(() => null),
-    // Check for MFA
+    checkSelector(config.selectors.successIndicator, 'success'),
     config.selectors.mfaCodeInput
-      ? page
-          .waitForSelector(config.selectors.mfaCodeInput, { timeout: 3000 })
-          .then(() => 'mfa' as const)
-          .catch(() => null)
+      ? checkSelector(config.selectors.mfaCodeInput, 'mfa')
       : Promise.resolve(null),
-    // Check for error
-    page
-      .waitForSelector(config.selectors.errorMessage, { timeout: 3000 })
-      .then(() => 'failed' as const)
-      .catch(() => null),
+    checkSelector(config.selectors.errorMessage, 'failed'),
   ];
 
   const results = await Promise.all(checks);
