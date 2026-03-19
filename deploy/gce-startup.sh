@@ -66,10 +66,11 @@ fi
 
 # ── 5. Clone repo ──
 echo "[5/8] Cloning conduit repo..."
+git config --global --add safe.directory /opt/conduit
 if [ ! -d /opt/conduit ]; then
   git clone https://github.com/eastseymour/conduit.git /opt/conduit
 else
-  cd /opt/conduit && git pull origin main || true
+  cd /opt/conduit && git fetch origin main && git reset --hard origin/main
 fi
 chown -R conduit:conduit /opt/conduit
 
