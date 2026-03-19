@@ -218,9 +218,9 @@ function BankSelectorDemo() {
               backgroundColor: bank.bankId === selectedBankId ? '#e8f4ff' : '#fff',
             }}
           >
-            <div style={styles.bankIcon}>{bank.displayName.charAt(0)}</div>
+            <div style={styles.bankIcon}>{bank.name.charAt(0)}</div>
             <div>
-              <div style={{ fontWeight: 600 }}>{bank.displayName}</div>
+              <div style={{ fontWeight: 600 }}>{bank.name}</div>
               <div style={{ fontSize: 12, color: '#888' }}>{bank.bankId}</div>
             </div>
           </div>
@@ -229,10 +229,13 @@ function BankSelectorDemo() {
 
       {selectedBank && (
         <div style={styles.selectedBankInfo}>
-          <strong>Selected:</strong> {selectedBank.displayName} ({selectedBank.bankId})
+          <strong>Selected:</strong> {selectedBank.name} ({selectedBank.bankId})
           <br />
           <span style={{ fontSize: 13, color: '#555' }}>
-            Supported features: {selectedBank.supportedFeatures.join(', ')}
+            Supported features: {[
+              selectedBank.supportsAccounts && 'accounts',
+              selectedBank.supportsTransactions && 'transactions',
+            ].filter(Boolean).join(', ')}
           </span>
         </div>
       )}
