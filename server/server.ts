@@ -194,14 +194,16 @@ async function runBankSession(
     session.page = page;
 
     await page.setViewport({ width: 1280, height: 800 });
-    await page.setUserAgent(
-      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-    );
+
+    // Use the real Chrome UA — Puppeteer bundles Chrome 146+, which banks accept.
+    // Previously we set a hardcoded Chrome/120 then Chrome/131 UA, which Chase
+    // rejected because the real browser version (from JS APIs) didn't match.
+    // Letting Chrome use its own UA avoids the mismatch entirely.
 
     // Anti-detection: remove webdriver flag and patch navigator
     await page.evaluateOnNewDocument(() => {
       Object.defineProperty(navigator, 'webdriver', { get: () => false });
-      // Spoof plugins (headless Chrome has none)
+      // Spoof plugins (headless Chrome reports none)
       Object.defineProperty(navigator, 'plugins', {
         get: () => [1, 2, 3, 4, 5],
       });
@@ -209,13 +211,6 @@ async function runBankSession(
       Object.defineProperty(navigator, 'languages', {
         get: () => ['en-US', 'en'],
       });
-      // Remove Chrome automation indicators
-      // @ts-ignore
-      delete window.cdc_adoQpoasnfa76pfcZLmcfl_Array;
-      // @ts-ignore
-      delete window.cdc_adoQpoasnfa76pfcZLmcfl_Promise;
-      // @ts-ignore
-      delete window.cdc_adoQpoasnfa76pfcZLmcfl_Symbol;
     });
 
     // ── Navigate to login page ──
