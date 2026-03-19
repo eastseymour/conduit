@@ -136,7 +136,8 @@ let browser: Browser | null = null;
 async function getBrowser(): Promise<Browser> {
   if (!browser || !browser.connected) {
     browser = await puppeteer.launch({
-      headless: 'shell',
+      // `true` = new headless mode (Chrome for Testing) — less detectable than 'shell'
+      headless: true,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
@@ -186,16 +187,59 @@ async function takeScreenshot(session: BankSession): Promise<void> {
 /**
  * When known selectors don't match, probe the live DOM for likely login
  * inputs and return the selectors that actually exist on the page.
+ * This version:
+ * - Traverses shadow DOM roots recursively
+ * - Uses robust visibility checks (handles position:fixed)
+ * - Broader heuristics for username inputs (tel, any text-like input)
  */
 async function probeForLoginInputs(
   page: Page,
   session: BankSession,
 ): Promise<{ username: string; password: string; submit: string } | null> {
-  updateCaption(session, 'Probing page for login inputs...');
+  updateCaption(session, 'Probing page for login inputs (including shadow DOM)...');
   try {
     const result = await page.evaluate(() => {
-      // Gather info about all inputs on the page
-      const inputs = Array.from(document.querySelectorAll('input'));
+      // ── Visibility check that handles position:fixed ──
+      function isVisible(el: Element): boolean {
+        if (!el) return false;
+        const style = window.getComputedStyle(el);
+        if (style.display === 'none' || style.visibility === 'hidden') return false;
+        if (parseFloat(style.opacity) === 0) return false;
+        const rect = el.getBoundingClientRect();
+        if (rect.width === 0 && rect.height === 0) return false;
+        return true;
+      }
+
+      // ── Recursive shadow DOM walker ──
+      function deepQueryAll(root: Document | ShadowRoot | Element, selector: string): Element[] {
+        const results: Element[] = [];
+        try { results.push(...Array.from(root.querySelectorAll(selector))); } catch {}
+        const allEls = root.querySelectorAll('*');
+        for (const el of allEls) {
+          if (el.shadowRoot) {
+            try { results.push(...deepQueryAll(el.shadowRoot, selector)); } catch {}
+          }
+        }
+        return results;
+      }
+
+      // Count shadow roots for diagnostics
+      function countShadowRoots(root: Document | ShadowRoot | Element): number {
+        let count = 0;
+        const allEls = root.querySelectorAll('*');
+        for (const el of allEls) {
+          if (el.shadowRoot) {
+            count++;
+            count += countShadowRoots(el.shadowRoot);
+          }
+        }
+        return count;
+      }
+
+      const shadowRootCount = countShadowRoots(document);
+
+      // Gather ALL inputs (including inside shadow DOM)
+      const inputs = deepQueryAll(document, 'input') as HTMLInputElement[];
       const inputInfo = inputs.map((el) => ({
         id: el.id,
         name: el.name,
@@ -203,65 +247,92 @@ async function probeForLoginInputs(
         placeholder: el.placeholder,
         ariaLabel: el.getAttribute('aria-label') || '',
         classes: el.className,
-        visible: el.offsetParent !== null,
+        visible: isVisible(el),
+        inShadowDOM: el.getRootNode() !== document,
+        tagName: el.tagName,
+        autocomplete: el.getAttribute('autocomplete') || '',
       }));
 
-      // Look for username-like input (text/email, visible)
+      // Look for username-like input — broader heuristics:
+      // Types: text, email, tel, '' (some banks use tel for user ID)
+      // IDs/names/attrs containing: user, login, username, signin, id
       const userInput = inputs.find(
         (el) =>
-          el.offsetParent !== null &&
-          (el.type === 'text' || el.type === 'email' || el.type === '') &&
+          isVisible(el) &&
+          (el.type === 'text' || el.type === 'email' || el.type === 'tel' || el.type === '') &&
           (el.id.toLowerCase().includes('user') ||
             el.name.toLowerCase().includes('user') ||
             el.placeholder.toLowerCase().includes('user') ||
             el.getAttribute('aria-label')?.toLowerCase().includes('user') ||
             el.id.toLowerCase().includes('login') ||
-            el.name.toLowerCase().includes('login')),
+            el.name.toLowerCase().includes('login') ||
+            el.id.toLowerCase().includes('signin') ||
+            el.getAttribute('autocomplete')?.includes('username') ||
+            // Catch-all: any text-ish input near a password input
+            el.id.toLowerCase().includes('id')),
       );
 
-      // Look for password input (visible)
+      // Fallback: if no match by name, just take the first visible text-like input
+      // (many login forms have only one text input)
+      const userInputFallback =
+        userInput ||
+        inputs.find(
+          (el) =>
+            isVisible(el) &&
+            (el.type === 'text' || el.type === 'email' || el.type === 'tel' || el.type === ''),
+        );
+
+      // Look for password input
       const passInput = inputs.find(
-        (el) => el.offsetParent !== null && el.type === 'password',
+        (el) => isVisible(el) && el.type === 'password',
       );
 
-      // Look for submit button
-      const buttons = Array.from(document.querySelectorAll('button, input[type="submit"]'));
+      // Look for submit button (also check shadow DOM)
+      const buttons = deepQueryAll(document, 'button, input[type="submit"], a[role="button"]') as HTMLElement[];
       const submitBtn = buttons.find(
         (el) =>
-          el.offsetParent !== null &&
+          isVisible(el) &&
           (el.id.toLowerCase().includes('sign') ||
             el.id.toLowerCase().includes('submit') ||
             el.id.toLowerCase().includes('login') ||
+            el.id.toLowerCase().includes('logon') ||
             el.textContent?.toLowerCase().includes('sign in') ||
             el.textContent?.toLowerCase().includes('log in') ||
-            el.textContent?.toLowerCase().includes('submit')),
+            el.textContent?.toLowerCase().includes('log on') ||
+            el.textContent?.toLowerCase().includes('submit') ||
+            el.getAttribute('aria-label')?.toLowerCase().includes('sign in')),
       );
 
+      // Build a CSS selector for an element
+      function selectorFor(el: Element | null, fallback: string): string | null {
+        if (!el) return null;
+        if (el.id) return `#${el.id}`;
+        if ((el as HTMLInputElement).name) return `input[name="${(el as HTMLInputElement).name}"]`;
+        return fallback;
+      }
+
+      const foundUser = selectorFor(userInputFallback || null, 'input[type="text"]');
+      const foundPass = selectorFor(passInput || null, 'input[type="password"]');
+      const foundSubmit = selectorFor(submitBtn || null, 'button[type="submit"]');
+
       return {
-        inputInfo,
-        buttonInfo: buttons.map((el) => ({
+        inputInfo: inputInfo.slice(0, 20),
+        buttonInfo: buttons.slice(0, 15).map((el) => ({
           id: el.id,
           text: el.textContent?.trim().substring(0, 50),
-          type: (el as HTMLButtonElement).type,
-          visible: el.offsetParent !== null,
+          type: (el as HTMLButtonElement).type || '',
+          visible: isVisible(el),
+          ariaLabel: el.getAttribute('aria-label') || '',
         })),
-        foundUser: userInput
-          ? userInput.id
-            ? `#${userInput.id}`
-            : `input[name="${userInput.name}"]`
-          : null,
-        foundPass: passInput
-          ? passInput.id
-            ? `#${passInput.id}`
-            : `input[type="password"]`
-          : null,
-        foundSubmit: submitBtn
-          ? submitBtn.id
-            ? `#${submitBtn.id}`
-            : null
-          : null,
+        foundUser,
+        foundPass,
+        foundSubmit,
         title: document.title,
         url: window.location.href,
+        shadowRootCount,
+        totalInputs: inputs.length,
+        totalButtons: buttons.length,
+        htmlSnippet: document.body?.innerHTML?.substring(0, 1500) || '',
       };
     });
 
@@ -271,12 +342,14 @@ async function probeForLoginInputs(
       timestamp: Date.now(),
       title: result.title,
       url: result.url,
-      inputCount: result.inputInfo.length,
-      inputs: result.inputInfo.slice(0, 10),
-      buttons: result.buttonInfo.slice(0, 10),
+      inputCount: result.totalInputs,
+      shadowRootCount: result.shadowRootCount,
+      inputs: result.inputInfo,
+      buttons: result.buttonInfo,
       foundUser: result.foundUser,
       foundPass: result.foundPass,
       foundSubmit: result.foundSubmit,
+      htmlSnippet: result.htmlSnippet.substring(0, 500),
     });
 
     if (result.foundUser && result.foundPass) {
@@ -287,8 +360,24 @@ async function probeForLoginInputs(
       };
     }
 
+    // If we found inputs but couldn't match heuristics, log it clearly
+    if (result.totalInputs > 0) {
+      emitEvent(session, {
+        type: 'dom_probe_partial',
+        timestamp: Date.now(),
+        message: `Found ${result.totalInputs} inputs but couldn't identify login fields`,
+        inputs: result.inputInfo,
+        shadowRootCount: result.shadowRootCount,
+      });
+    }
+
     return null;
-  } catch {
+  } catch (err) {
+    emitEvent(session, {
+      type: 'dom_probe_error',
+      timestamp: Date.now(),
+      error: err instanceof Error ? err.message : String(err),
+    });
     return null;
   }
 }
@@ -427,23 +516,48 @@ async function runBankSession(
     let formFound = false;
 
     // Attempt 1: Wait for known selectors (with generous timeout for SPA boot)
+    // Uses waitForFunction with shadow DOM traversal so we find elements
+    // even inside web components / shadow roots.
     updateCaption(session, 'Looking for login form with known selectors...');
     try {
-      // Use a function that tries each selector in the comma-separated list
+      // Use a function that tries each selector AND walks shadow roots
       await page.waitForFunction(
         (selectorList: string) => {
           const selectors = selectorList.split(',').map((s) => s.trim());
-          return selectors.some((s) => document.querySelector(s) !== null);
+          // First try normal querySelector
+          if (selectors.some((s) => document.querySelector(s) !== null)) return true;
+          // Then traverse shadow roots
+          function deepFind(root: Document | ShadowRoot | Element, sel: string): boolean {
+            try { if (root.querySelector(sel)) return true; } catch { return false; }
+            const els = root.querySelectorAll('*');
+            for (const el of els) {
+              if (el.shadowRoot && deepFind(el.shadowRoot, sel)) return true;
+            }
+            return false;
+          }
+          return selectors.some((s) => deepFind(document, s));
         },
         { timeout: 25000 },
         config.selectors.usernameInput,
       );
       formFound = true;
 
-      // Figure out which specific selector matched
+      // Figure out which specific selector matched (including shadow DOM)
       const matchedSelector = await page.evaluate((selectorList: string) => {
         const selectors = selectorList.split(',').map((s) => s.trim());
-        return selectors.find((s) => document.querySelector(s) !== null) || null;
+        // Normal querySelector first
+        const normalMatch = selectors.find((s) => document.querySelector(s) !== null);
+        if (normalMatch) return normalMatch;
+        // Shadow DOM traversal
+        function deepFind(root: Document | ShadowRoot | Element, sel: string): boolean {
+          try { if (root.querySelector(sel)) return true; } catch { return false; }
+          const els = root.querySelectorAll('*');
+          for (const el of els) {
+            if (el.shadowRoot && deepFind(el.shadowRoot, sel)) return true;
+          }
+          return false;
+        }
+        return selectors.find((s) => deepFind(document, s)) || null;
       }, config.selectors.usernameInput);
 
       if (matchedSelector) {
@@ -477,6 +591,50 @@ async function runBankSession(
       }
     } catch {
       // Known selectors didn't match — try probing
+    }
+
+    // Attempt 1b: Try Puppeteer's built-in shadow-piercing selectors
+    // The `pierce/` prefix and `>>>` combinator traverse shadow DOMs natively
+    if (!formFound) {
+      updateCaption(session, 'Trying shadow-piercing selectors...');
+      const pierceSelectors = [
+        'pierce/#userId-input-field-input',
+        'pierce/#userId-text-input-field',
+        'pierce/input[id*="userId"]',
+        'pierce/input[name="userId"]',
+        'pierce/input[type="password"]',
+      ];
+      for (const sel of pierceSelectors) {
+        try {
+          const el = await page.$(sel);
+          if (el) {
+            emitEvent(session, {
+              type: 'pierce_selector_matched',
+              timestamp: Date.now(),
+              selector: sel,
+            });
+            // We found an element via pierce — use pierce selectors for all fields
+            usernameSelector = sel.includes('password') ? usernameSelector : sel;
+            if (sel.includes('password')) {
+              passwordSelector = sel;
+            }
+            formFound = true;
+          }
+        } catch {
+          // pierce selector not supported or didn't match
+        }
+      }
+      // If we found username via pierce, also find password and submit
+      if (formFound) {
+        try {
+          const passEl = await page.$('pierce/input[type="password"]');
+          if (passEl) passwordSelector = 'pierce/input[type="password"]';
+        } catch {}
+        try {
+          const submitEl = await page.$('pierce/#signin-button') || await page.$('pierce/button[id*="signin"]');
+          if (submitEl) submitSelector = 'pierce/#signin-button';
+        } catch {}
+      }
     }
 
     // Attempt 2: Probe the DOM for any login-like inputs
@@ -524,23 +682,57 @@ async function runBankSession(
     }
 
     if (!formFound) {
-      // Capture diagnostic info before failing
-      const pageInfo = await page.evaluate(() => ({
-        title: document.title,
-        url: window.location.href,
-        bodyText: document.body?.innerText?.substring(0, 500) || '',
-        inputCount: document.querySelectorAll('input').length,
-        iframeCount: document.querySelectorAll('iframe').length,
-      }));
+      // Capture comprehensive diagnostic info before failing
+      const pageInfo = await page.evaluate(() => {
+        // Count shadow roots
+        function countShadowRoots(root: Document | Element): number {
+          let count = 0;
+          const allEls = root.querySelectorAll('*');
+          for (const el of allEls) {
+            if (el.shadowRoot) {
+              count++;
+              count += countShadowRoots(el.shadowRoot);
+            }
+          }
+          return count;
+        }
+        // Deep count inputs (including shadow DOM)
+        function deepCount(root: Document | ShadowRoot | Element, sel: string): number {
+          let count = 0;
+          try { count += root.querySelectorAll(sel).length; } catch {}
+          const els = root.querySelectorAll('*');
+          for (const el of els) {
+            if (el.shadowRoot) count += deepCount(el.shadowRoot, sel);
+          }
+          return count;
+        }
+        return {
+          title: document.title,
+          url: window.location.href,
+          bodyText: document.body?.innerText?.substring(0, 800) || '',
+          inputCount: document.querySelectorAll('input').length,
+          deepInputCount: deepCount(document, 'input'),
+          iframeCount: document.querySelectorAll('iframe').length,
+          shadowRootCount: countShadowRoots(document),
+          htmlSnippet: document.body?.innerHTML?.substring(0, 2000) || '',
+          customElements: Array.from(document.querySelectorAll('*'))
+            .filter(el => el.tagName.includes('-'))
+            .slice(0, 10)
+            .map(el => el.tagName.toLowerCase()),
+        };
+      });
 
       session.status = 'failed';
-      session.error = `Login form not found — page title: "${pageInfo.title}", URL: ${pageInfo.url}, inputs: ${pageInfo.inputCount}, iframes: ${pageInfo.iframeCount}`;
+      session.error = `Login form not found — page: "${pageInfo.title}", URL: ${pageInfo.url}, inputs: ${pageInfo.inputCount} (deep: ${pageInfo.deepInputCount}), iframes: ${pageInfo.iframeCount}, shadowRoots: ${pageInfo.shadowRootCount}`;
       updateCaption(session, session.error);
       emitEvent(session, {
         type: 'error',
         timestamp: Date.now(),
         error: session.error,
-        diagnostics: pageInfo,
+        diagnostics: {
+          ...pageInfo,
+          htmlSnippet: pageInfo.htmlSnippet.substring(0, 1000),
+        },
       });
       await takeScreenshot(session);
       return;
@@ -560,12 +752,31 @@ async function runBankSession(
     session.status = 'submitting';
     updateCaption(session, 'Entering username...');
 
+    // Helper: resolve element handle — tries loginTarget.$() first, then page.$()
+    // for pierce selectors (which only work on Page, not Frame)
+    async function resolveElement(selector: string): Promise<Awaited<ReturnType<Page['$']>>> {
+      let el = await loginTarget.$(selector);
+      if (!el && loginTarget !== page) {
+        el = await page.$(selector);
+      }
+      // If selector starts with 'pierce/', it only works on page.$()
+      if (!el && selector.startsWith('pierce/')) {
+        el = await page.$(selector);
+      }
+      return el;
+    }
+
     // Clear and type username — use evaluate to clear first for robustness
-    const userEl = await loginTarget.$(usernameSelector);
+    const userEl = await resolveElement(usernameSelector);
     if (userEl) {
       await userEl.click({ clickCount: 3 });
       await userEl.type(credentials.username, { delay: config.typeDelay ?? 50 });
     } else {
+      emitEvent(session, {
+        type: 'warning',
+        timestamp: Date.now(),
+        message: `Could not resolve username element with selector: ${usernameSelector}`,
+      });
       await loginTarget.click(usernameSelector, { clickCount: 3 });
       await loginTarget.type(usernameSelector, credentials.username, {
         delay: config.typeDelay ?? 50,
@@ -573,7 +784,7 @@ async function runBankSession(
     }
 
     updateCaption(session, 'Entering password...');
-    const passEl = await loginTarget.$(passwordSelector);
+    const passEl = await resolveElement(passwordSelector);
     if (passEl) {
       await passEl.click({ clickCount: 3 });
       await passEl.type(credentials.password, { delay: config.typeDelay ?? 50 });
@@ -588,7 +799,7 @@ async function runBankSession(
     updateCaption(session, 'Submitting credentials...');
 
     // ── Click submit ──
-    const submitEl = await loginTarget.$(submitSelector);
+    const submitEl = await resolveElement(submitSelector);
     if (submitEl) {
       await submitEl.click();
     } else {
