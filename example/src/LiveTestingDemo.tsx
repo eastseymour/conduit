@@ -12,15 +12,27 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 
+// Detect HTTPS → HTTP mixed-content issues
+function isOnSecurePage(): boolean {
+  return typeof window !== 'undefined' && window.location.protocol === 'https:'
+}
+
+function isGitHubPages(): boolean {
+  return typeof window !== 'undefined' && window.location.hostname === 'eastseymour.github.io'
+}
+
 // Server URLs to try, in order of preference
 function getServerCandidates(): string[] {
   const candidates: string[] = []
   // When served from the Puppeteer server itself, same-origin just works
-  if (typeof window !== 'undefined' && window.location.hostname !== 'eastseymour.github.io') {
+  if (typeof window !== 'undefined' && !isGitHubPages()) {
     candidates.push(window.location.origin)
   }
-  candidates.push('http://localhost:3001')        // Local dev server
-  candidates.push('http://conduit-live:3001')     // Tailscale MagicDNS
+  // Only try HTTP URLs if we're not on an HTTPS page (mixed-content would block)
+  if (!isOnSecurePage()) {
+    candidates.push('http://localhost:3001')        // Local dev server
+    candidates.push('http://conduit-live:3001')     // Tailscale MagicDNS
+  }
   return candidates
 }
 
@@ -75,6 +87,8 @@ export function LiveTestingDemo() {
   )
   const [customUrl, setCustomUrl] = useState('')
   const [serverOnline, setServerOnline] = useState<boolean | null>(null)
+  const [checking, setChecking] = useState(false)
+  const [lastError, setLastError] = useState<string | null>(null)
   const [banks, setBanks] = useState<BankInfo[]>([])
   const [selectedBank, setSelectedBank] = useState<string>('')
   const [username, setUsername] = useState('')
@@ -91,28 +105,43 @@ export function LiveTestingDemo() {
   const eventSourceRef = useRef<EventSource | null>(null)
   const screenshotIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
+  const mixedContentBlocked = isOnSecurePage()
+
   // ── Auto-discover server ──
   useEffect(() => {
     let cancelled = false
 
-    async function tryServer(url: string): Promise<boolean> {
+    async function tryServer(url: string): Promise<{ ok: boolean; error?: string }> {
       try {
-        const res = await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(2000) })
-        return res.ok
-      } catch { return false }
+        const res = await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(3000) })
+        if (res.ok) return { ok: true }
+        return { ok: false, error: `Server returned ${res.status}` }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Connection failed'
+        // Detect mixed-content explicitly
+        if (isOnSecurePage() && url.startsWith('http:')) {
+          return { ok: false, error: 'Blocked by browser — HTTPS pages cannot make HTTP requests (mixed content)' }
+        }
+        return { ok: false, error: msg }
+      }
     }
 
     async function discover() {
+      if (!cancelled) setChecking(true)
+
       // If we already have a working URL, just check it
       if (serverUrl) {
-        const ok = await tryServer(serverUrl)
+        const result = await tryServer(serverUrl)
         if (!cancelled) {
-          if (ok) {
+          setChecking(false)
+          if (result.ok) {
             setServerOnline(true)
+            setLastError(null)
             saveServerUrl(serverUrl)
             await fetchBanks(serverUrl)
           } else {
             setServerOnline(false)
+            setLastError(result.error || null)
           }
         }
         return
@@ -121,16 +150,24 @@ export function LiveTestingDemo() {
       // Try candidates
       for (const candidate of getServerCandidates()) {
         if (cancelled) return
-        const ok = await tryServer(candidate)
-        if (ok && !cancelled) {
+        const result = await tryServer(candidate)
+        if (result.ok && !cancelled) {
           setServerUrl(candidate)
           setServerOnline(true)
+          setLastError(null)
+          setChecking(false)
           saveServerUrl(candidate)
           await fetchBanks(candidate)
           return
         }
       }
-      if (!cancelled) setServerOnline(false)
+      if (!cancelled) {
+        setServerOnline(false)
+        setChecking(false)
+        if (getServerCandidates().length === 0 && isOnSecurePage()) {
+          setLastError('Cannot discover HTTP servers from an HTTPS page (mixed content blocked by browser)')
+        }
+      }
     }
 
     async function fetchBanks(url: string) {
@@ -145,7 +182,7 @@ export function LiveTestingDemo() {
     }
 
     discover()
-    const interval = setInterval(discover, 5000)
+    const interval = setInterval(discover, 10000) // Check every 10s (was 5s)
     return () => { cancelled = true; clearInterval(interval) }
   }, [serverUrl])
 
@@ -301,49 +338,115 @@ export function LiveTestingDemo() {
         Test real bank logins with actual credentials via Puppeteer server (local or Tailscale).
       </p>
 
+      {/* Mixed-content warning for GitHub Pages users */}
+      {isGitHubPages() && (
+        <div style={{ ...sty.badge, backgroundColor: '#fff3e0', border: '1px solid #ffcc80', flexDirection: 'column', alignItems: 'flex-start', gap: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 18 }}>⚠️</span>
+            <strong style={{ fontSize: 14 }}>Live testing requires the Conduit server</strong>
+          </div>
+          <p style={{ margin: 0, fontSize: 13, color: '#666', lineHeight: 1.6 }}>
+            This page is served over HTTPS, so the browser blocks HTTP connections to the live testing server.
+            <br />To use live testing, access the demo directly from the server:
+          </p>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <a
+              href="http://conduit-live:3001/conduit/"
+              style={{ ...sty.btn, ...sty.btnPrimary, textDecoration: 'none', fontSize: 13 }}
+            >
+              Open via Tailscale → conduit-live:3001
+            </a>
+            <a
+              href="http://localhost:3001/conduit/"
+              style={{ ...sty.btn, ...sty.btnSecondary, textDecoration: 'none', fontSize: 13 }}
+            >
+              Open via localhost:3001
+            </a>
+          </div>
+          <p style={{ margin: 0, fontSize: 12, color: '#999' }}>
+            The server serves this same demo page, so API calls work same-origin.
+          </p>
+        </div>
+      )}
+
       {/* Server Status */}
       <div style={{ ...sty.badge, backgroundColor: serverOnline ? '#e8f5e9' : serverOnline === false ? '#fce4ec' : '#f5f5f5' }}>
         <span style={{
           ...sty.dot,
           backgroundColor: serverOnline ? '#4caf50' : serverOnline === false ? '#f44336' : '#aaa',
+          ...(checking ? { animation: 'pulse 1s ease-in-out infinite' } : {}),
         }} />
-        {serverOnline === null && 'Discovering server...'}
+        {checking && !serverOnline && 'Checking server...'}
+        {!checking && serverOnline === null && 'Discovering server...'}
         {serverOnline === true && `Connected to ${serverUrl}`}
-        {serverOnline === false && 'Server not found — enter URL or start local server'}
+        {!checking && serverOnline === false && (lastError || 'Server not found')}
       </div>
 
-      {/* Server URL config */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16, alignItems: 'center' }}>
-        <input
-          type="text"
-          value={customUrl || serverUrl}
-          onChange={e => setCustomUrl(e.target.value)}
-          placeholder="http://conduit-live:3001 or http://localhost:3001"
-          style={{ ...sty.input, flex: 1, fontSize: 13 }}
-        />
-        <button
-          onClick={() => {
-            const url = (customUrl || serverUrl).replace(/\/+$/, '')
-            if (url) { setServerUrl(url); setCustomUrl(''); setServerOnline(null) }
-          }}
-          style={{ ...sty.btn, ...sty.btnSecondary, fontSize: 12, padding: '8px 14px' }}
-        >
-          Connect
-        </button>
-      </div>
+      {/* Server URL config (hidden on GitHub Pages since it won't work) */}
+      {!isGitHubPages() && (
+        <>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 16, alignItems: 'center' }}>
+            <input
+              type="text"
+              value={customUrl !== '' ? customUrl : serverUrl}
+              onChange={e => setCustomUrl(e.target.value)}
+              placeholder="http://conduit-live:3001 or http://localhost:3001"
+              style={{ ...sty.input, flex: 1, fontSize: 13 }}
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  const url = (customUrl || serverUrl).replace(/\/+$/, '')
+                  if (url) { setServerUrl(url); setCustomUrl(''); setServerOnline(null); setLastError(null); setChecking(true) }
+                }
+              }}
+            />
+            <button
+              onClick={() => {
+                const url = (customUrl || serverUrl).replace(/\/+$/, '')
+                if (url) { setServerUrl(url); setCustomUrl(''); setServerOnline(null); setLastError(null); setChecking(true) }
+              }}
+              disabled={checking}
+              style={{
+                ...sty.btn, ...sty.btnSecondary, fontSize: 12, padding: '8px 14px',
+                opacity: checking ? 0.6 : 1,
+              }}
+            >
+              {checking ? 'Checking...' : 'Connect'}
+            </button>
+          </div>
 
-      {serverOnline === false && (
-        <div style={sty.instructions}>
-          <h3 style={{ margin: '0 0 12px', fontSize: 16 }}>Connection Options</h3>
-          <ol style={{ margin: 0, paddingLeft: 20, lineHeight: 2 }}>
-            <li><strong>Tailscale:</strong> Enter <code>http://conduit-live:3001</code> above (if deployed to GCP)</li>
-            <li><strong>Local:</strong> Run <code>cd server && npm install && npm start</code></li>
-            <li><strong>URL param:</strong> Add <code>?server=http://your-ip:3001</code> to the page URL</li>
-          </ol>
-          <p style={{ margin: '12px 0 0', fontSize: 13, color: '#888' }}>
-            Credentials are passed directly to the Puppeteer server and never stored.
-          </p>
-        </div>
+          {serverOnline === false && !checking && (
+            <div style={sty.instructions}>
+              <h3 style={{ margin: '0 0 12px', fontSize: 16 }}>How to connect</h3>
+
+              {mixedContentBlocked && (
+                <div style={{ backgroundColor: '#fff3e0', border: '1px solid #ffcc80', borderRadius: 6, padding: 12, marginBottom: 12, fontSize: 13 }}>
+                  <strong>⚠️ Mixed content issue:</strong> You're on HTTPS but the server uses HTTP.
+                  Open the server URL directly in your browser instead.
+                </div>
+              )}
+
+              <ol style={{ margin: 0, paddingLeft: 20, lineHeight: 2.2, fontSize: 14 }}>
+                <li>
+                  <strong>Access via Tailscale (GCP):</strong>{' '}
+                  Go to <a href="http://conduit-live:3001/conduit/" style={{ color: '#0275d8' }}>http://conduit-live:3001/conduit/</a> directly
+                </li>
+                <li>
+                  <strong>Access locally:</strong>{' '}
+                  Run <code style={{ backgroundColor: '#f0f0f0', padding: '2px 6px', borderRadius: 3 }}>cd server && npm install && npm start</code>,
+                  then go to <a href="http://localhost:3001/conduit/" style={{ color: '#0275d8' }}>http://localhost:3001/conduit/</a>
+                </li>
+                <li>
+                  <strong>Custom URL:</strong>{' '}
+                  Enter the server URL above and press Enter or click Connect
+                </li>
+              </ol>
+              <p style={{ margin: '12px 0 0', fontSize: 12, color: '#999' }}>
+                The server serves this demo page itself, so everything works same-origin (no CORS/mixed-content issues).
+                Credentials are passed directly to the Puppeteer server and never stored.
+              </p>
+            </div>
+          )}
+        </>
       )}
 
       {serverOnline && (

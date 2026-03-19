@@ -12,7 +12,6 @@ echo "[0] Ensuring DNS works..."
 if ! getent hosts google.com &>/dev/null; then
   echo "DNS broken, adding Google DNS fallback..."
   cp /etc/resolv.conf /etc/resolv.conf.bak 2>/dev/null || true
-  # Temporarily disable Tailscale DNS override and use Google DNS
   {
     echo "nameserver 8.8.8.8"
     echo "nameserver 8.8.4.4"
@@ -23,7 +22,7 @@ if ! getent hosts google.com &>/dev/null; then
 fi
 
 # ── 1. System deps for Puppeteer/Chromium ──
-echo "[1/8] Installing system dependencies..."
+echo "[1/9] Installing system dependencies..."
 apt-get update -qq || true
 apt-get install -y -qq \
   ca-certificates curl gnupg git \
@@ -31,10 +30,10 @@ apt-get install -y -qq \
   libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 \
   libxrandr2 libgbm1 libpango-1.0-0 libcairo2 \
   libasound2 libxshmfence1 libx11-xcb1 libxss1 \
-  fonts-liberation libappindicator3-1 xdg-utils wget || echo "WARN: apt-get install failed (deps may already be installed)"
+  fonts-liberation libappindicator3-1 xdg-utils wget || echo "WARN: some apt packages failed (may already be installed)"
 
 # ── 2. Node.js 20 LTS ──
-echo "[2/8] Installing Node.js 20..."
+echo "[2/9] Installing Node.js 20..."
 if ! command -v node &>/dev/null; then
   curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
   apt-get install -y -qq nodejs
@@ -42,7 +41,7 @@ fi
 echo "Node $(node -v), npm $(npm -v)"
 
 # ── 3. Tailscale ──
-echo "[3/8] Installing Tailscale..."
+echo "[3/9] Installing Tailscale..."
 if ! command -v tailscale &>/dev/null; then
   curl -fsSL https://tailscale.com/install.sh | sh
 fi
@@ -52,50 +51,66 @@ TAILSCALE_AUTH_KEY=$(curl -s -H "Metadata-Flavor: Google" \
 
 if [ -n "$TAILSCALE_AUTH_KEY" ]; then
   echo "Authenticating Tailscale..."
-  tailscale up --authkey="$TAILSCALE_AUTH_KEY" --hostname=conduit-live --accept-routes
-  echo "Tailscale IP: $(tailscale ip -4)"
+  tailscale up --authkey="$TAILSCALE_AUTH_KEY" --hostname=conduit-live --accept-routes || echo "WARN: tailscale up failed (may already be authenticated)"
+  echo "Tailscale IP: $(tailscale ip -4 2>/dev/null || echo 'unknown')"
 else
-  echo "WARNING: No Tailscale auth key found in metadata. Skipping Tailscale auth."
+  echo "No Tailscale auth key in metadata. Checking existing auth..."
+  if tailscale status &>/dev/null; then
+    echo "Tailscale already authenticated. IP: $(tailscale ip -4 2>/dev/null || echo 'unknown')"
+  else
+    echo "WARNING: Tailscale not authenticated and no auth key provided."
+  fi
 fi
 
 # ── 4. Create conduit user ──
-echo "[4/8] Creating conduit user..."
+echo "[4/9] Creating conduit user..."
 if ! id conduit &>/dev/null; then
   useradd -r -m -s /bin/bash conduit
 fi
 
-# ── 5. Clone repo ──
-echo "[5/8] Cloning conduit repo..."
+# ── 5. Clone/update repo ──
+echo "[5/9] Cloning/updating conduit repo..."
 if [ ! -d /opt/conduit ]; then
   git clone https://github.com/eastseymour/conduit.git /opt/conduit
   chown -R conduit:conduit /opt/conduit
 else
-  # Pull latest as the conduit user (avoids dubious ownership errors)
   cd /opt/conduit
-  sudo -u conduit git fetch origin main
-  sudo -u conduit git reset --hard origin/main
+  # Safe directory config for both root and conduit user
+  git config --global --add safe.directory /opt/conduit 2>/dev/null || true
+  sudo -u conduit git config --global --add safe.directory /opt/conduit 2>/dev/null || true
+  sudo -u conduit git fetch origin main 2>&1 || git fetch origin main 2>&1
+  sudo -u conduit git reset --hard origin/main 2>&1 || git reset --hard origin/main 2>&1
+  chown -R conduit:conduit /opt/conduit
 fi
 
-# ── 6. Build SDK + demo + install server deps ──
-echo "[6/8] Building SDK..."
+# ── 6. Build SDK ──
+echo "[6/9] Building SDK..."
 cd /opt/conduit
-sudo -u conduit npm install 2>&1 | tail -5
-sudo -u conduit npm run build 2>&1 | tail -5
+sudo -u conduit npm install 2>&1 | tail -10
+sudo -u conduit npm run build 2>&1 | tail -10
 echo "SDK built."
 
-echo "[7/8] Building demo app..."
+# ── 7. Build demo app ──
+echo "[7/9] Building demo app..."
 cd /opt/conduit/example
-sudo -u conduit npm install 2>&1 | tail -5
-sudo -u conduit npm run build 2>&1 | tail -5
+sudo -u conduit npm install 2>&1 | tail -10
+sudo -u conduit npm run build 2>&1 | tail -10
 echo "Demo built."
 
-echo "[8/8] Installing server dependencies..."
+# ── 8. Install server deps + verify Chrome ──
+echo "[8/9] Installing server dependencies (including Puppeteer + Chrome)..."
 cd /opt/conduit/server
-sudo -u conduit npm install --production 2>&1 | tail -5
+# Full install (not --production) so puppeteer downloads Chrome
+sudo -u conduit npm install 2>&1 | tail -10
 echo "Server deps installed."
 
-# ── 8. Create and start systemd service ──
-echo "[8/8] Setting up systemd service..."
+# Verify Chrome is available
+echo "Verifying Puppeteer Chrome..."
+CHROME_CHECK=$(sudo -u conduit npx -y puppeteer browsers install chrome 2>&1 | tail -3)
+echo "$CHROME_CHECK"
+
+# ── 9. Create and start systemd service ──
+echo "[9/9] Setting up systemd service..."
 cat > /etc/systemd/system/conduit-server.service << 'SVCEOF'
 [Unit]
 Description=Conduit Live Testing Server (Puppeteer)
@@ -112,8 +127,7 @@ RestartSec=5
 Environment=PORT=3001
 Environment=NODE_ENV=production
 Environment=NODE_OPTIONS=--max-old-space-size=2048
-# Give Chrome enough /dev/shm
-Environment=PUPPETEER_CACHE_DIR=/opt/conduit/.cache/puppeteer
+Environment=HOME=/home/conduit
 
 [Install]
 WantedBy=multi-user.target
@@ -121,12 +135,25 @@ SVCEOF
 
 systemctl daemon-reload
 systemctl enable conduit-server
-systemctl start conduit-server
+systemctl restart conduit-server
+
+# Wait a moment and verify it started
+sleep 3
+if systemctl is-active --quiet conduit-server; then
+  echo "✅ conduit-server is running!"
+else
+  echo "❌ conduit-server failed to start. Logs:"
+  journalctl -u conduit-server --no-pager -n 30
+fi
 
 echo ""
 echo "=== Conduit startup script completed at $(date) ==="
 echo "Server should be running on port 3001"
 if command -v tailscale &>/dev/null && tailscale status &>/dev/null; then
-  echo "Tailscale IP: $(tailscale ip -4)"
-  echo "Access: http://$(tailscale ip -4):3001/api/health"
+  TS_IP=$(tailscale ip -4 2>/dev/null || echo "unknown")
+  echo "Tailscale IP: $TS_IP"
+  echo ""
+  echo "Access the demo:  http://conduit-live:3001/conduit/"
+  echo "Health check:     http://$TS_IP:3001/api/health"
+  echo "Or via MagicDNS:  http://conduit-live:3001/api/health"
 fi
