@@ -158,15 +158,20 @@ const BANK_CONFIGS: Record<string, BankConfig> = {
     selectors: {
       usernameInput: '#j_username',
       passwordInput: '#j_password',
-      submitButton: '#btnSignon',
-      errorMessage: '.error-message, .alert-error',
-      mfaCodeInput: '#challengeAnswer, input[name="answer"]',
-      mfaSubmitButton: '#btnContinue',
-      successIndicator: '.account-summary, .balances-container',
-      accountsList: '.account-summary',
+      // WF redesigned their login — the submit button no longer has an ID.
+      // Use data-testid (primary) and form submit fallback.
+      submitButton: 'button[data-testid="signon-button"], #btnSignon, #signOnForm button[type="submit"]',
+      // WF uses CSS-module class names for error messages — match by partial class and role
+      errorMessage: '[class*="ErrorMessage__errorMessageText"], [class*="WFMessage__error"], [class*="error-message"], [role="alert"]',
+      mfaCodeInput: '#otp, #challengeAnswer, input[name="answer"], input[name="otp"], input[id*="otp"], input[id*="challenge"]',
+      mfaSubmitButton: 'button[data-testid="continue-button"], #btnContinue, button[type="submit"]',
+      // MFA challenge page indicators (Wells Fargo device verification)
+      mfaChallengePage: '[class*="StepUpAuth"], [class*="EnhancedAuth"], [class*="challenge"], [data-testid*="challenge"], [data-testid*="verify"]',
+      successIndicator: '[class*="AccountSummary"], [class*="account-summary"], [class*="BalancesSummary"], [class*="DashboardPage"], [data-testid="account-summary"]',
+      accountsList: '[class*="AccountSummary"], [class*="account-summary"]',
     },
     typeDelay: 30,
-    postSubmitWait: 3000,
+    postSubmitWait: 5000,
   },
 };
 
@@ -803,7 +808,8 @@ async function runBankSession(
     // Helper: resolve element handle with timeout — tries loginTarget.$() first,
     // then page.$() for pierce selectors (which only work on Page, not Frame).
     // If the loginTarget iframe was detached/recreated, re-grab the current frame.
-    async function resolveElement(selector: string): Promise<Awaited<ReturnType<Page['$']>>> {
+    // Supports comma-separated selectors — tries each one individually.
+    async function resolveElement(selectorList: string): Promise<Awaited<ReturnType<Page['$']>>> {
       // Re-grab loginTarget from page.frames() in case Chase reloaded the iframe
       // IMPORTANT: skip the main frame — we only want sub-frames (iframes)
       if (loginTarget !== page) {
@@ -818,18 +824,39 @@ async function runBankSession(
         if (currentFrame) loginTarget = currentFrame;
       }
 
-      emitEvent(session, { type: 'debug_resolve', timestamp: Date.now(), selector, target: loginTarget === page ? 'page' : 'frame' });
+      emitEvent(session, { type: 'debug_resolve', timestamp: Date.now(), selector: selectorList, target: loginTarget === page ? 'page' : 'frame' });
 
-      let el = await loginTarget.$(selector);
-      if (!el && loginTarget !== page) {
-        el = await page.$(selector);
+      // Split comma-separated selectors and try each individually
+      const selectors = selectorList.split(',').map((s) => s.trim());
+      for (const selector of selectors) {
+        try {
+          let el = await loginTarget.$(selector);
+          if (el) {
+            emitEvent(session, { type: 'debug_resolve_result', timestamp: Date.now(), selector, found: true });
+            return el;
+          }
+          if (loginTarget !== page) {
+            el = await page.$(selector);
+            if (el) {
+              emitEvent(session, { type: 'debug_resolve_result', timestamp: Date.now(), selector, found: true, fallback: 'page' });
+              return el;
+            }
+          }
+          // If selector starts with 'pierce/', it only works on page.$()
+          if (selector.startsWith('pierce/')) {
+            el = await page.$(selector);
+            if (el) {
+              emitEvent(session, { type: 'debug_resolve_result', timestamp: Date.now(), selector, found: true, fallback: 'pierce' });
+              return el;
+            }
+          }
+        } catch {
+          // Selector might be invalid — try next
+        }
       }
-      // If selector starts with 'pierce/', it only works on page.$()
-      if (!el && selector.startsWith('pierce/')) {
-        el = await page.$(selector);
-      }
-      emitEvent(session, { type: 'debug_resolve_result', timestamp: Date.now(), selector, found: !!el });
-      return el;
+
+      emitEvent(session, { type: 'debug_resolve_result', timestamp: Date.now(), selector: selectorList, found: false });
+      return null;
     }
 
     // Clear and type username — use evaluate to clear first for robustness
@@ -872,7 +899,23 @@ async function runBankSession(
     if (submitEl) {
       await submitEl.click();
     } else {
-      await loginTarget.click(submitSelector);
+      // Fallback: try each selector individually, then try form.submit()
+      let clicked = false;
+      for (const sel of submitSelector.split(',').map((s) => s.trim())) {
+        try {
+          await loginTarget.click(sel);
+          clicked = true;
+          break;
+        } catch {}
+      }
+      if (!clicked) {
+        // Last resort: submit the first visible form
+        emitEvent(session, { type: 'warning', timestamp: Date.now(), message: 'Submit button not found — trying form.submit()' });
+        await loginTarget.evaluate(() => {
+          const form = document.querySelector('form') as HTMLFormElement;
+          if (form) form.submit();
+        });
+      }
     }
     emitEvent(session, { type: 'status', timestamp: Date.now(), status: 'submitting' });
 
@@ -888,7 +931,7 @@ async function runBankSession(
     // Chase's SPA navigates the iframe from #/logon/logon/chaseOnline to
     // #/logon/recognizeUser/simplerAuthOptions (MFA) or the dashboard.
     // The main page stays at the same URL (hash-based routing in iframe).
-    let outcomeResult: 'success' | 'mfa' | 'mfa_method_selection' | 'failed' = 'failed';
+    let outcomeResult: 'success' | 'mfa' | 'mfa_method_selection' | 'error' | 'pending' = 'pending';
     const pollStartTime = Date.now();
     const pollTimeoutMs = 30000;
     const pollIntervalMs = 2000;
@@ -913,7 +956,8 @@ async function runBankSession(
         frameUrl: loginTarget !== page ? (() => { try { return loginTarget.url(); } catch { return 'unknown'; } })() : undefined,
       });
 
-      if (outcomeResult !== 'failed') {
+      // Break on any terminal state (anything except 'pending')
+      if (outcomeResult !== 'pending') {
         break;
       }
 
@@ -1506,7 +1550,7 @@ async function detectOutcome(
   config: BankConfig,
   page: Page,
   loginTarget?: Page | Frame,
-): Promise<'success' | 'mfa' | 'mfa_method_selection' | 'failed'> {
+): Promise<'success' | 'mfa' | 'mfa_method_selection' | 'error' | 'pending'> {
   // Check both the main page and login target (if different) for selectors
   const targets: Array<Page | Frame> = [page];
   if (loginTarget && loginTarget !== page) targets.push(loginTarget);
@@ -1612,6 +1656,7 @@ async function detectOutcome(
   async function checkPageTextForError(): Promise<string | null> {
     const errorPatterns = [
       /can.?t find that username/i,
+      /combination doesn.?t match/i,
       /invalid.*username.*password/i,
       /incorrect.*password/i,
       /account.*locked/i,
@@ -1645,14 +1690,14 @@ async function detectOutcome(
   ];
 
   const results = await Promise.all(checks);
-  // Priority: success > mfa_code > mfa_challenge > mfa_text > error_selector > error_text > default failed
+  // Priority: success > mfa_code > mfa_challenge > mfa_text > error_selector > error_text > pending
   if (results[0] === 'success') return 'success';
   if (results[1] === 'mfa') return 'mfa';
   if (results[2] === 'mfa_challenge') return 'mfa_method_selection';
   if (results[4] === 'mfa_text') return 'mfa_method_selection';
-  if (results[3] === 'failed') return 'failed';
-  if (results[5] === 'error_text') return 'failed';
-  return 'failed';
+  if (results[3] === 'failed') return 'error';     // error selector matched — terminal
+  if (results[5] === 'error_text') return 'error';  // error text found — terminal
+  return 'pending';                                  // nothing detected yet — keep polling
 }
 
 // ─── Account Extraction ─────────────────────────────────────────────
@@ -1956,34 +2001,27 @@ async function handleLoginSuccess(
 }
 
 async function extractErrorText(page: Page, config: BankConfig): Promise<string> {
-  // Try CSS selector on main page
-  try {
-    const el = await page.$(config.selectors.errorMessage);
-    if (el) {
-      const text = await page.evaluate((e) => e.textContent, el);
-      if (text?.trim()) return text.trim();
-    }
-  } catch {}
+  const selectors = config.selectors.errorMessage.split(',').map((s) => s.trim());
 
-  // Try CSS selector on all frames
-  try {
-    for (const frame of page.frames()) {
+  // Try each CSS selector on main page, then all frames
+  // Prefer more specific selectors (tried first) to get cleaner error text
+  const targets: Array<Page | Frame> = [page, ...page.frames()];
+  for (const sel of selectors) {
+    for (const target of targets) {
       try {
-        const selectors = config.selectors.errorMessage.split(',').map((s) => s.trim());
-        for (const sel of selectors) {
-          const el = await frame.$(sel);
-          if (el) {
-            const text = await frame.evaluate((e) => e.textContent, el);
-            if (text?.trim()) return text.trim();
-          }
+        const el = await target.$(sel);
+        if (el) {
+          const text = await target.evaluate((e) => e.textContent, el);
+          if (text?.trim()) return text.trim();
         }
       } catch {}
     }
-  } catch {}
+  }
 
   // Fallback: check all frames for error-like text
   const errorPatterns = [
     /(?:can.?t find|invalid|incorrect|wrong).*(?:username|password|credentials)/i,
+    /combination doesn.?t match/i,
     /account.*(?:locked|disabled|suspended)/i,
     /too many.*(?:attempts|tries)/i,
   ];
