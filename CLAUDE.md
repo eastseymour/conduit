@@ -51,6 +51,9 @@ src/
 │   ├── navigation.ts        # Navigation state machine (discriminated union, transitions)
 │   ├── bridge.ts            # WebView message types (inbound/outbound), WebViewRef, CookieData
 │   └── index.ts             # Barrel export
+├── extractors/              # Data extraction from bank DOM pages (CDT-13)
+│   ├── account-extractor.ts # Account extraction: transforms, type inference, assembly
+│   └── index.ts             # Barrel export
 ├── sdk/                     # High-level SDK types for host app integration
 │   ├── types.ts             # PreviewState, PreviewStatus — host-facing preview state
 │   └── index.ts             # Barrel export
@@ -98,6 +101,8 @@ tests/
 │       ├── sensitive-field-masker.test.ts      # Script generation and result parsing tests
 │       ├── transition-state-machine.test.ts   # Transition state machine lifecycle tests
 │       └── integration.test.ts                # End-to-end preview flow tests
+├── extractors/
+│   └── account-extractor.test.ts  # Account extraction: parseAmount, inferType, assembly, edge cases
 ├── conduit-types.test.ts          # Account, Transaction, BankAdapter, Config, LinkSession tests
 ├── navigation.test.ts             # Navigation state machine transition tests
 ├── MessageBridge.test.ts          # Bridge communication tests
@@ -360,8 +365,16 @@ None required for the SDK itself. Browser driver implementations may need enviro
 23. `BankSelectorController.filteredBanks` is always a subset of `allBanks`
 24. Selected bank is cleared when it's no longer in the filtered results
 
+### Account Data Extraction (CDT-13)
+25. Account extraction requires successful login — `extractAccounts()` is called from `handleLoginSuccess()` only after authentication succeeds
+26. `parseAmount()` always returns a finite number — NaN and Infinity are converted to 0
+27. `inferAccountType()` always returns a valid AccountTypeName — defaults to 'other' if no pattern matches
+28. Account IDs are unique within a single extraction run — generated from bankId + sequential index
+29. Required fields (name) cause the account tile to be skipped if missing — extraction continues with remaining tiles
+30. The `extracting` session status indicates account extraction is in progress — clients should wait for `success`
+
 ### Visual Browser Preview
-25. `BrowserPreviewController` must be disposed before the engine it's attached to — `dispose()` detaches automatically
+31. `BrowserPreviewController` must be disposed before the engine it's attached to — `dispose()` detaches automatically
 26. Transition state follows `idle → transitioning → complete → idle` — enforced via `assertValidTransitionPhaseChange()`
 27. Starting a new transition while already transitioning force-completes the previous transition first
 28. Zero-duration or `TransitionType.None` transitions complete instantly (no transitioning state)

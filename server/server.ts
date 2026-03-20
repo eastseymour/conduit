@@ -9,12 +9,13 @@
  *     Credentials are passed transiently and never stored.
  *
  * Endpoints:
- *   POST /api/sessions          — Start a new bank login session
- *   POST /api/sessions/:id/mfa  — Submit MFA response
- *   POST /api/sessions/:id/cancel — Cancel a session
- *   GET  /api/sessions/:id/events — SSE stream of session events
+ *   POST /api/sessions              — Start a new bank login session
+ *   POST /api/sessions/:id/mfa      — Submit MFA response
+ *   POST /api/sessions/:id/cancel   — Cancel a session
+ *   GET  /api/sessions/:id/events   — SSE stream of session events
  *   GET  /api/sessions/:id/screenshot — Current page screenshot
- *   GET  /api/health             — Health check
+ *   GET  /api/sessions/:id/accounts — Extracted account data (after success)
+ *   GET  /api/health               — Health check
  */
 
 import express from 'express';
@@ -33,10 +34,21 @@ interface SessionEvent {
   [key: string]: unknown;
 }
 
+/** Extracted account info — matches the Account interface from src/types/conduit.ts */
+interface AccountInfo {
+  id: string;
+  name: string;
+  type: string;
+  accountNumber: string;
+  balance: { current: number; available?: number; limit?: number };
+  currency: string;
+  institutionId: string;
+}
+
 interface BankSession {
   id: string;
   bankId: string;
-  status: 'navigating' | 'login_page' | 'submitting' | 'mfa_required' | 'success' | 'failed' | 'cancelled';
+  status: 'navigating' | 'login_page' | 'submitting' | 'mfa_required' | 'extracting' | 'success' | 'failed' | 'cancelled';
   page: Page | null;
   events: SessionEvent[];
   listeners: Set<express.Response>;
@@ -44,6 +56,8 @@ interface BankSession {
   screenshot: Buffer | null;
   caption: string;
   error: string | null;
+  /** Extracted accounts (populated after successful login + extraction) */
+  accounts: AccountInfo[];
 }
 
 // ─── Bank Configs (CSS selectors for real bank pages) ───────────────
@@ -70,6 +84,15 @@ interface BankConfig {
     mfaMethodNextButton?: string;
     successIndicator: string;
     accountsList?: string;
+  };
+  /** Account page selectors for extracting account data post-login */
+  accountPage?: {
+    accountsList: string;
+    accountItem: string;
+    accountName: string;
+    accountNumber?: string;
+    accountBalance: string;
+    accountType?: string;
   };
   /** Delay ms after typing each character (some banks need it slow). */
   typeDelay?: number;
@@ -99,6 +122,14 @@ const BANK_CONFIGS: Record<string, BankConfig> = {
       mfaMethodNextButton: '#requestIdentificationCode-sm, button[id*="next"], #Next',
       successIndicator: '.accounts-container, #accountTileList, .dashboard-container, .account-tile, [data-testid="account-tile"]',
       accountsList: '#accountTileList',
+    },
+    accountPage: {
+      accountsList: '.accounts-container, #accountTileList',
+      accountItem: '.account-tile, [data-testid="account-tile"]',
+      accountName: '.account-name, .tile-accountName',
+      accountNumber: '.account-number, .mask-number',
+      accountBalance: '.account-balance, .tile-amount',
+      accountType: '.account-type',
     },
     typeDelay: 50,
     postSubmitWait: 5000,
@@ -1286,9 +1317,7 @@ async function runBankSession(
 
           mfaResponse.code = codeResponse.code;
         } else if (postMethodResult === 'success') {
-          session.status = 'success';
-          updateCaption(session, 'Successfully connected!');
-          emitEvent(session, { type: 'status', timestamp: Date.now(), status: 'success' });
+          await handleLoginSuccess(session, config, page, loginTarget);
           await takeScreenshot(session);
           emitEvent(session, { type: 'complete', timestamp: Date.now(), status: session.status });
           return;
@@ -1358,9 +1387,7 @@ async function runBankSession(
 
         const postCodeResult = await detectOutcome(session, config, page, loginTarget);
         if (postCodeResult === 'success') {
-          session.status = 'success';
-          updateCaption(session, 'Successfully connected!');
-          emitEvent(session, { type: 'status', timestamp: Date.now(), status: 'success' });
+          await handleLoginSuccess(session, config, page, loginTarget);
         } else {
           session.status = 'failed';
           session.error = 'Authentication failed after MFA code entry';
@@ -1443,9 +1470,7 @@ async function runBankSession(
 
       const postMfaResult = await detectOutcome(session, config, page, loginTarget);
       if (postMfaResult === 'success') {
-        session.status = 'success';
-        updateCaption(session, 'Successfully connected!');
-        emitEvent(session, { type: 'status', timestamp: Date.now(), status: 'success' });
+        await handleLoginSuccess(session, config, page, loginTarget);
       } else {
         session.status = 'failed';
         session.error = 'Authentication failed after MFA';
@@ -1453,9 +1478,7 @@ async function runBankSession(
         emitEvent(session, { type: 'error', timestamp: Date.now(), error: session.error });
       }
     } else if (outcomeResult === 'success') {
-      session.status = 'success';
-      updateCaption(session, 'Successfully connected!');
-      emitEvent(session, { type: 'status', timestamp: Date.now(), status: 'success' });
+      await handleLoginSuccess(session, config, page, loginTarget);
     } else {
       // Failed
       session.status = 'failed';
@@ -1632,6 +1655,306 @@ async function detectOutcome(
   return 'failed';
 }
 
+// ─── Account Extraction ─────────────────────────────────────────────
+
+/**
+ * Known patterns for inferring account type from the account name.
+ * Ordered by specificity — more specific patterns first.
+ */
+const ACCOUNT_TYPE_PATTERNS: [RegExp, string][] = [
+  // Credit cards
+  [/credit\s*card/i, 'credit_card'],
+  [/sapphire/i, 'credit_card'],
+  [/freedom/i, 'credit_card'],
+  [/slate/i, 'credit_card'],
+  [/unlimited/i, 'credit_card'],
+  [/preferred/i, 'credit_card'],
+  [/amazon.*visa/i, 'credit_card'],
+  [/visa\s*(signature|infinite|platinum)/i, 'credit_card'],
+  [/mastercard/i, 'credit_card'],
+  [/rewards/i, 'credit_card'],
+  [/ink\s*(business|cash|preferred|unlimited)/i, 'credit_card'],
+  [/marriott/i, 'credit_card'],
+  [/united/i, 'credit_card'],
+  [/southwest/i, 'credit_card'],
+  [/aeroplan/i, 'credit_card'],
+  // Mortgage
+  [/mortgage/i, 'mortgage'],
+  [/home\s*loan/i, 'mortgage'],
+  // Line of credit
+  [/line\s*of\s*credit/i, 'line_of_credit'],
+  [/heloc/i, 'line_of_credit'],
+  // Investment
+  [/invest/i, 'investment'],
+  [/brokerage/i, 'investment'],
+  [/ira/i, 'investment'],
+  [/401k/i, 'investment'],
+  [/you\s*invest/i, 'investment'],
+  // Loan
+  [/auto\s*loan/i, 'loan'],
+  [/car\s*loan/i, 'loan'],
+  [/personal\s*loan/i, 'loan'],
+  [/student\s*loan/i, 'loan'],
+  [/loan/i, 'loan'],
+  // Savings
+  [/savings/i, 'savings'],
+  [/money\s*market/i, 'savings'],
+  [/certificate/i, 'savings'],
+  // Checking
+  [/checking/i, 'checking'],
+  [/debit/i, 'checking'],
+  [/total\s*checking/i, 'checking'],
+  [/premier\s*plus/i, 'checking'],
+  [/secure\s*checking/i, 'checking'],
+];
+
+/**
+ * Infer account type from name and optional explicit type.
+ * @returns A valid account type string
+ */
+function inferAccountType(accountName: string, explicitType?: string): string {
+  if (explicitType) {
+    const normalized = explicitType.trim().toLowerCase();
+    const validTypes = ['checking', 'savings', 'credit_card', 'loan', 'investment', 'mortgage', 'line_of_credit', 'other'];
+    if (validTypes.includes(normalized)) return normalized;
+    for (const [pattern, type] of ACCOUNT_TYPE_PATTERNS) {
+      if (pattern.test(normalized)) return type;
+    }
+  }
+  for (const [pattern, type] of ACCOUNT_TYPE_PATTERNS) {
+    if (pattern.test(accountName)) return type;
+  }
+  return 'other';
+}
+
+/**
+ * Parse a currency amount string into a number.
+ * Handles "$1,234.56", "-$1,234.56", "($1,234.56)" (accounting negative), "$0.00", etc.
+ * @returns A finite number, or 0 if unparseable
+ */
+function parseAmount(raw: string): number {
+  if (!raw || typeof raw !== 'string') return 0;
+  const trimmed = raw.trim();
+  if (trimmed === '' || trimmed === '--' || trimmed === 'N/A') return 0;
+  const isNegative = trimmed.startsWith('-') || (trimmed.startsWith('(') && trimmed.endsWith(')'));
+  const cleaned = trimmed.replace(/[^0-9.]/g, '');
+  const parsed = parseFloat(cleaned);
+  if (!Number.isFinite(parsed)) return 0;
+  return isNegative ? -Math.abs(parsed) : parsed;
+}
+
+/**
+ * Extract accounts from the post-login dashboard page.
+ *
+ * Precondition: session.status is 'success' (login completed)
+ * Postcondition: session.accounts is populated with AccountInfo[]
+ *
+ * @param session - Active bank session with a Puppeteer page
+ * @param config - Bank configuration with account page selectors
+ * @param page - The Puppeteer page showing the dashboard
+ * @param loginTarget - The page or frame where the dashboard rendered
+ */
+async function extractAccounts(
+  session: BankSession,
+  config: BankConfig,
+  page: Page,
+  loginTarget: Page | Frame,
+): Promise<AccountInfo[]> {
+  if (!config.accountPage) {
+    emitEvent(session, {
+      type: 'account_extraction_skipped',
+      timestamp: Date.now(),
+      reason: 'No accountPage selectors configured for this bank',
+    });
+    return [];
+  }
+
+  session.status = 'extracting';
+  updateCaption(session, 'Extracting account data from dashboard...');
+  emitEvent(session, { type: 'status', timestamp: Date.now(), status: 'extracting' });
+
+  const selectors = config.accountPage;
+
+  // Wait for account list to appear (it may take a moment after login)
+  const targets: Array<Page | Frame> = [page];
+  if (loginTarget && loginTarget !== page) targets.push(loginTarget);
+
+  let listFound = false;
+  const listSelectors = selectors.accountsList.split(',').map((s) => s.trim());
+  for (const t of targets) {
+    for (const sel of listSelectors) {
+      try {
+        await t.waitForSelector(sel, { timeout: 15000 });
+        listFound = true;
+        break;
+      } catch {}
+    }
+    if (listFound) break;
+  }
+
+  if (!listFound) {
+    emitEvent(session, {
+      type: 'account_extraction_failed',
+      timestamp: Date.now(),
+      error: 'Account list container not found after login',
+      selectorsAttempted: listSelectors,
+    });
+    return [];
+  }
+
+  await takeScreenshot(session);
+
+  // Execute DOM extraction in the browser context
+  // We try each target (main page and iframe) until we find accounts
+  for (const t of targets) {
+    try {
+      const rawAccounts = await t.evaluate((sels: {
+        accountsList: string;
+        accountItem: string;
+        accountName: string;
+        accountNumber?: string;
+        accountBalance: string;
+        accountType?: string;
+      }) => {
+        // Find the accounts list container
+        const listSelectors = sels.accountsList.split(',').map((s: string) => s.trim());
+        let container: Element | null = null;
+        for (const sel of listSelectors) {
+          container = document.querySelector(sel);
+          if (container) break;
+        }
+        if (!container) container = document.body;
+
+        // Find individual account items
+        const itemSelectors = sels.accountItem.split(',').map((s: string) => s.trim());
+        let items: Element[] = [];
+        for (const sel of itemSelectors) {
+          const found = container.querySelectorAll(sel);
+          if (found.length > 0) {
+            items = Array.from(found);
+            break;
+          }
+        }
+
+        // If nothing in container, try whole document
+        if (items.length === 0) {
+          for (const sel of itemSelectors) {
+            const found = document.querySelectorAll(sel);
+            if (found.length > 0) {
+              items = Array.from(found);
+              break;
+            }
+          }
+        }
+
+        // Extract fields from each account item
+        const extractText = (item: Element, selectorList: string): string | null => {
+          const sels = selectorList.split(',').map((s: string) => s.trim());
+          for (const sel of sels) {
+            const el = item.querySelector(sel);
+            if (el && el.textContent) return el.textContent.trim();
+          }
+          return null;
+        };
+
+        return items.map((item) => ({
+          accountName: extractText(item, sels.accountName),
+          accountNumber: sels.accountNumber ? extractText(item, sels.accountNumber) : null,
+          balance: extractText(item, sels.accountBalance),
+          accountType: sels.accountType ? extractText(item, sels.accountType) : null,
+        }));
+      }, selectors);
+
+      if (rawAccounts && rawAccounts.length > 0) {
+        emitEvent(session, {
+          type: 'account_extraction_raw',
+          timestamp: Date.now(),
+          rawAccountCount: rawAccounts.length,
+          rawAccounts: rawAccounts.map((a) => ({
+            name: a.accountName,
+            number: a.accountNumber,
+            balance: a.balance,
+            type: a.accountType,
+          })),
+        });
+
+        // Assemble into AccountInfo[]
+        const accounts: AccountInfo[] = [];
+        for (let i = 0; i < rawAccounts.length; i++) {
+          const raw = rawAccounts[i]!;
+          const name = raw.accountName?.trim();
+          if (!name) continue; // Skip tiles with no name (likely not real accounts)
+
+          const balanceValue = raw.balance ? parseAmount(raw.balance) : 0;
+          const accountType = inferAccountType(name, raw.accountType ?? undefined);
+          const accountNumber = raw.accountNumber?.trim() || `****${String(i).padStart(4, '0')}`;
+
+          accounts.push({
+            id: `${config.bankId}-acct-${i}`,
+            name,
+            type: accountType,
+            accountNumber,
+            balance: { current: balanceValue },
+            currency: 'USD',
+            institutionId: config.bankId,
+          });
+        }
+
+        if (accounts.length > 0) {
+          emitEvent(session, {
+            type: 'accounts_extracted',
+            timestamp: Date.now(),
+            accountCount: accounts.length,
+            accounts: accounts.map((a) => ({
+              id: a.id,
+              name: a.name,
+              type: a.type,
+              accountNumber: a.accountNumber,
+              balance: a.balance.current,
+            })),
+          });
+          return accounts;
+        }
+      }
+    } catch (err) {
+      emitEvent(session, {
+        type: 'account_extraction_error',
+        timestamp: Date.now(),
+        error: err instanceof Error ? err.message : String(err),
+        target: t === page ? 'page' : 'frame',
+      });
+    }
+  }
+
+  emitEvent(session, {
+    type: 'account_extraction_failed',
+    timestamp: Date.now(),
+    error: 'No valid accounts could be extracted from any target',
+  });
+  return [];
+}
+
+/**
+ * Handle successful login: extract accounts, then set session to success.
+ * This is the common handler called from all success paths in the login flow.
+ */
+async function handleLoginSuccess(
+  session: BankSession,
+  config: BankConfig,
+  page: Page,
+  loginTarget: Page | Frame,
+): Promise<void> {
+  // Extract accounts before marking as success
+  const accounts = await extractAccounts(session, config, page, loginTarget);
+  session.accounts = accounts;
+
+  session.status = 'success';
+  updateCaption(session, accounts.length > 0
+    ? `Successfully connected! Found ${accounts.length} account${accounts.length === 1 ? '' : 's'}.`
+    : 'Successfully connected!');
+  emitEvent(session, { type: 'status', timestamp: Date.now(), status: 'success', accountCount: accounts.length });
+}
+
 async function extractErrorText(page: Page, config: BankConfig): Promise<string> {
   // Try CSS selector on main page
   try {
@@ -1734,6 +2057,7 @@ app.post('/api/sessions', (req, res) => {
     screenshot: null,
     caption: 'Starting...',
     error: null,
+    accounts: [],
   };
 
   sessions.set(session.id, session);
@@ -1834,6 +2158,35 @@ app.get('/api/sessions/:id/screenshot', (req, res) => {
   return res.end(session.screenshot);
 });
 
+// Get extracted accounts for a session
+app.get('/api/sessions/:id/accounts', (req, res) => {
+  const session = sessions.get(req.params.id);
+  if (!session) {
+    return res.status(404).json({ error: 'Session not found' });
+  }
+
+  if (session.status === 'extracting') {
+    return res.status(202).json({
+      status: 'extracting',
+      message: 'Account extraction is in progress',
+    });
+  }
+
+  if (session.status !== 'success') {
+    return res.status(400).json({
+      error: 'Accounts are only available after successful login',
+      currentStatus: session.status,
+    });
+  }
+
+  return res.json({
+    sessionId: session.id,
+    bankId: session.bankId,
+    accounts: session.accounts,
+    accountCount: session.accounts.length,
+  });
+});
+
 // Get session status
 app.get('/api/sessions/:id', (req, res) => {
   const session = sessions.get(req.params.id);
@@ -1848,6 +2201,7 @@ app.get('/api/sessions/:id', (req, res) => {
     caption: session.caption,
     error: session.error,
     eventCount: session.events.length,
+    accountCount: session.accounts.length,
   });
 });
 
