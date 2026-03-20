@@ -35,6 +35,29 @@ export {
   type AdapterValidationResult,
 } from './validation';
 
+// Transforms
+export { parseAmount, parseDate, applyTransform } from './transforms';
+
+// Extraction engine
+export {
+  ExtractionError,
+  ExtractionErrorCode,
+  type ExtractionErrorCodeName,
+  type DomContext,
+  type ExtractedRow,
+  extractRows,
+  extractPage,
+} from './extraction';
+
+// Transaction extraction
+export {
+  extractTransactions,
+  rowToTransaction,
+  getTransactionSelectors,
+  type TransactionExtractionOptions,
+  type TransactionDomContext,
+} from './transaction-extractor';
+
 // Built-in adapters
 export { chaseAdapter } from './banks/chase';
 export { bankOfAmericaAdapter } from './banks/bank-of-america';

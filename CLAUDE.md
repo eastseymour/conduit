@@ -31,7 +31,10 @@ src/
 │   ├── index.ts             # Public API re-exports
 │   ├── registry.ts          # BankAdapterRegistry — plugin registration with duplicate/conflict detection
 │   ├── types.ts             # Adapter types: selectors, extractors, MFA detection, config
-│   └── validation.ts        # Config validation with detailed error messages
+│   ├── validation.ts        # Config validation with detailed error messages
+│   ├── transforms.ts        # Extraction transforms: parseAmount, parseDate, trim, etc. (CDT-14)
+│   ├── extraction.ts        # Generic DOM extraction engine with DomContext interface (CDT-14)
+│   └── transaction-extractor.ts  # Transaction extraction with pagination and filtering (CDT-14)
 ├── auth/                    # Bank authentication module
 │   ├── types.ts             # All auth types (discriminated unions, error types, validation)
 │   ├── auth-state-machine.ts # State machine enforcing valid auth transitions
@@ -84,7 +87,10 @@ tests/
 │   ├── banks.test.ts              # Built-in adapter config tests (Chase, BofA, Wells Fargo)
 │   ├── registry.test.ts           # Registry registration, lookup, search, conflict detection
 │   ├── types.test.ts              # Adapter type construction and validation
-│   └── validation.test.ts         # Config validation: selectors, extractors, MFA rules
+│   ├── validation.test.ts         # Config validation: selectors, extractors, MFA rules
+│   ├── transforms.test.ts         # Transform functions: parseAmount, parseDate, applyTransform (CDT-14)
+│   ├── extraction.test.ts         # DOM extraction engine: strategies, rows, pages (CDT-14)
+│   └── transaction-extractor.test.ts  # Transaction extraction: pagination, filtering, Chase config (CDT-14)
 ├── server/
 │   └── stealth.test.ts           # Stealth module: UA building, version extraction, script generation (57 tests)
 ├── ui/
@@ -140,6 +146,23 @@ The adapter system provides a pluggable architecture for bank-specific automatio
 - **BankSelectors** — CSS selectors for login fields, MFA prompts, account pages, transaction tables
 - **BankExtractors** — `FieldExtractor` with `selector`, `attribute`, optional `transform` for extracting structured data from bank pages
 - **MfaDetector** — URL patterns + CSS selectors to detect MFA challenge type (sms, email, security_question, push)
+
+### Transaction Extraction Engine (CDT-14)
+
+The extraction system provides a generic, bank-agnostic engine for extracting structured data from bank pages:
+
+- **Transform Functions** (`transforms.ts`) — Pure functions for `parseAmount`, `parseDate`, `trim`, `maskAccountNumber`, etc.
+- **DomContext Interface** (`extraction.ts`) — Abstracts DOM querying so extraction works with Puppeteer, JSDOM, or WebView
+- **ExtractionStrategy** — Discriminated union for field extraction: `textContent`, `innerText`, `attribute`, `value`, `regex`
+- **extractTransactions()** — Full pipeline: wait for list → extract rows → handle pagination → convert to Transaction → filter by date → sort → ensure unique IDs
+- **rowToTransaction()** — Converts extracted row data to `Transaction` with date/amount parsing, status detection, deterministic ID generation
+
+Key invariants:
+- Transaction.amount is always a finite signed number (negative = debit)
+- Transaction.date is always ISO 8601 (YYYY-MM-DD)
+- Transaction.status is always 'pending' or 'posted'
+- Transaction IDs are unique within the returned array
+- Pagination terminates after maxPages to prevent infinite loops
 
 ### Bank Selector UI
 

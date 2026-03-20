@@ -34,6 +34,14 @@ Plaid competitor — an Expo SDK that runs an embedded browser to log into banki
 - **MFA detection** — URL patterns and CSS selectors to identify MFA challenge types
 - **Bank selector UI** — Headless, searchable bank list controller (framework-agnostic)
 
+### Transaction Extraction Engine (CDT-14)
+- **Generic extraction engine** — Configurable DOM extraction using adapter-defined selectors and strategies
+- **Transform pipeline** — `parseAmount` (currency, signs, thousands), `parseDate` (US, ISO, named months), `trim`, `maskAccountNumber`
+- **Pagination handling** — Clicks "load more" buttons with configurable max pages
+- **Pending/posted detection** — Distinguishes pending from posted transactions
+- **Date range filtering** — Filters transactions by start/end date (inclusive)
+- **DomContext interface** — Abstraction for DOM queries, works with Puppeteer, JSDOM, or WebView
+
 ### Browser Anti-Detection Stealth (CDT-10)
 - **Comprehensive fingerprint evasion** — 20 fingerprint surfaces patched to evade bank client-side detection
 - **UA version consistency** — Chrome version extracted from real browser, never hardcoded
@@ -114,6 +122,25 @@ if (authenticated) {
     }
   }
   await adapter.cleanup();
+}
+```
+
+### Transaction Extraction (CDT-14)
+
+```typescript
+import { extractTransactions, chaseAdapter, type TransactionDomContext } from '@conduit/sdk';
+
+const ctx: TransactionDomContext = createPuppeteerDomContext(page);
+const transactions = await extractTransactions(ctx, chaseAdapter, {
+  accountId: 'chase-checking-001',
+  currency: 'USD',
+  startDate: '2024-01-01',
+  endDate: '2024-01-31',
+  maxPages: 5,
+});
+
+for (const txn of transactions) {
+  console.log(`${txn.date} ${txn.description} ${txn.amount} (${txn.status})`);
 }
 ```
 
@@ -210,7 +237,10 @@ src/
 │   ├── banks/   # Built-in adapters (Chase, BofA, Wells Fargo)
 │   ├── registry.ts    # Plugin registry with conflict detection
 │   ├── types.ts       # Selectors, extractors, MFA detection rules
-│   └── validation.ts  # Config validation with field-level errors
+│   ├── validation.ts  # Config validation with field-level errors
+│   ├── transforms.ts  # Value transforms: parseAmount, parseDate (CDT-14)
+│   ├── extraction.ts  # Generic DOM extraction engine (CDT-14)
+│   └── transaction-extractor.ts  # Transaction extraction with pagination (CDT-14)
 ├── auth/        # Authentication logic with state machine
 ├── browser/     # Abstract BrowserDriver interface
 ├── core/        # Embedded WebView engine + MessageBridge
