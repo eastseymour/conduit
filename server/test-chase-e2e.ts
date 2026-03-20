@@ -1347,8 +1347,12 @@ export {
   printReport,
 };
 
-// Run if executed directly
-main().catch((err) => {
-  console.error('Unhandled error:', err);
-  process.exit(1);
-});
+// Run if executed directly (not when imported by tests).
+// When tsx runs this file directly, require.main === module.
+// When jest imports it, require.main !== module.
+if (require.main === module) {
+  main().catch((err) => {
+    console.error('Unhandled error:', err);
+    process.exit(1);
+  });
+}

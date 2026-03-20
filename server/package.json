@@ -6,7 +6,8 @@
   "scripts": {
     "start": "tsx server.ts",
     "dev": "tsx watch server.ts",
-    "test:chase": "tsx test-chase-e2e.ts"
+    "test:chase": "tsx test-chase-e2e.ts",
+    "test": "npx jest --config jest.config.js --forceExit"
   },
   "dependencies": {
     "cors": "^2.8.5",
@@ -17,6 +18,10 @@
   "devDependencies": {
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
-    "@types/node": "^22.0.0"
+    "@types/jest": "^29.5.12",
+    "@types/node": "^22.0.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.2",
+    "typescript": "^5.5.0"
   }
 }

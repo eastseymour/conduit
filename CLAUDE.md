@@ -96,6 +96,14 @@ tests/
 ├── MessageBridge.test.ts          # Bridge communication tests
 ├── BrowserEngine.test.ts          # Engine integration tests (mock WebView)
 └── CookieManager.test.ts          # Cookie storage and persistence tests
+
+server/
+├── server.ts                      # Express server with Puppeteer bank automation
+├── test-chase-e2e.ts              # Chase login E2E test script (CDT-11)
+├── test-chase-e2e.test.ts         # Unit tests for the E2E script
+├── jest.config.js                 # Server-specific Jest config (ts-jest, diagnostics off)
+├── package.json                   # Server dependencies (express, puppeteer, tsx)
+└── screenshots/                   # (gitignored) Timestamped E2E screenshots
 ```
 
 ## Key Patterns
@@ -224,6 +232,53 @@ The package is configured for SDK distribution:
 - `main`: `dist/index.js` — CommonJS entry point
 - `types`: `dist/index.d.ts` — TypeScript declarations
 - `peerDependencies`: `react`, `react-native`, `react-native-webview`, `expo` (optional)
+
+## Live Server (`server/`)
+
+The `server/` directory contains a local Puppeteer-based backend for live bank testing.
+
+### Commands (from `server/`)
+
+```bash
+npm install           # Install dependencies (auto-installs Chrome)
+npm start             # Start the Express server (tsx server.ts)
+npm run dev           # Start in watch mode
+npm test              # Run server unit tests (Jest)
+npm run test:chase    # Run the Chase E2E login test (requires credentials)
+```
+
+### Chase E2E Test (`server/test-chase-e2e.ts`)
+
+Manual E2E test script that validates the Chase login flow with screenshots at each step.
+
+**Expected flow:** `init → browser_launched → navigating → login_page_loaded → credentials_filled → submitted → device_verification → mfa_code_entry → mfa_submitted → success`
+
+**Environment variables:**
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `CHASE_USER` | Yes | — | Chase username |
+| `CHASE_PASS` | Yes | — | Chase password |
+| `CHASE_E2E_HEADLESS` | No | `true` | Run browser headless (`true`/`false`) |
+| `CHASE_E2E_TIMEOUT` | No | `45000` | Navigation timeout in ms |
+| `CHASE_E2E_SCREENSHOT_DIR` | No | `./screenshots` | Directory for timestamped screenshots |
+
+**Usage:**
+```bash
+cd server
+CHASE_USER=myuser CHASE_PASS=mypass npm run test:chase
+# Or for visible browser:
+CHASE_USER=myuser CHASE_PASS=mypass CHASE_E2E_HEADLESS=false npm run test:chase
+```
+
+**Key features:**
+- Mirrors all stealth patches from `server.ts` (UA cleaning, navigator.webdriver, plugins, chrome runtime)
+- Multi-strategy form detection: known selectors → iframe probe → shadow DOM → deep DOM probe
+- Outcome detection: success, MFA code entry, device verification, error (via CSS selectors + text pattern matching)
+- Timestamped screenshots at every stage transition
+- Interactive TTY mode for MFA code entry (when running non-headless)
+- Prints summary report with PASS/STOPPED result and stage log
+
+**Exports (for unit testing):** `CHASE_SELECTORS`, `CHASE_LOGIN_URL`, `STAGE_ORDER`, `buildConfig`, `applyStealthPatches`, `probeForLoginForm`, `detectOutcome`, `extractMfaMethods`, `extractErrorText`, `takeScreenshot`, `runChaseE2E`, `printReport`
 
 ## Environment Variables
 
