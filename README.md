@@ -34,6 +34,15 @@ Plaid competitor — an Expo SDK that runs an embedded browser to log into banki
 - **MFA detection** — URL patterns and CSS selectors to identify MFA challenge types
 - **Bank selector UI** — Headless, searchable bank list controller (framework-agnostic)
 
+### Account Data Extraction (CDT-13)
+- **Post-login extraction** — After successful login + MFA, automatically extracts account data from the bank dashboard
+- **Account type inference** — Infers checking, savings, credit_card, mortgage, loan, investment, etc. from account names using pattern matching
+- **Currency parsing** — Handles $1,234.56, -$500.00, ($1,234.56) accounting notation, and edge cases like $0.00
+- **Multiple account support** — Extracts all visible accounts from the dashboard (checking, savings, credit cards, loans, mortgages)
+- **Edge case handling** — Zero-balance accounts, missing account numbers, unnamed tiles gracefully handled
+- **Declarative selectors** — Chase account page selectors configured in BankConfig (accountsList, accountItem, name, number, balance, type)
+- **API endpoint** — `GET /api/sessions/:id/accounts` returns extracted AccountInfo[] after successful login
+
 ### Visual Browser Preview (CDT-4)
 - **Live browser preview** — Minimized real-time view of the bank browser as navigation happens
 - **Configurable container** — Pixel-based (e.g., 300x200) or percentage-based sizing
@@ -204,6 +213,7 @@ src/
 ├── auth/        # Authentication logic with state machine
 ├── browser/     # Abstract BrowserDriver interface
 ├── core/        # Embedded WebView engine + MessageBridge
+├── extractors/  # Data extraction from bank DOM (accounts, transactions)
 ├── sdk/         # High-level SDK types for host app integration
 ├── types/       # Core domain types (Account, Transaction, BankAdapter, Config, LinkSession)
 └── ui/          # UI components
