@@ -23,6 +23,7 @@ import path from 'path';
 import { randomUUID } from 'crypto';
 import puppeteer, { type Browser, type Page, type Frame } from 'puppeteer';
 import { applyStealthToPage, STEALTH_LAUNCH_ARGS, extractChromeVersion } from './stealth';
+import { ensureChromeBinary } from './chrome-validator';
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -1864,30 +1865,43 @@ app.get('*', (_req, res) => {
 
 const PORT = parseInt(process.env.PORT ?? '3001', 10);
 
-app.listen(PORT, async () => {
-  console.log(`\n🏦 Conduit Live Testing Server`);
-  console.log(`   http://localhost:${PORT}`);
-  console.log(`\n   Available banks: ${Object.values(BANK_CONFIGS).map((b) => b.name).join(', ')}`);
-
-  // CDT-10: Log the Chrome version at startup for UA mismatch debugging
+async function startServer(): Promise<void> {
+  // CDT-8: Validate Chrome binary before accepting connections
   try {
-    const b = await getBrowser();
-    const ua = await b.userAgent();
-    const chromeVersion = extractChromeVersion(ua);
-    console.log(`\n   Chrome version: ${chromeVersion ?? 'unknown'}`);
-    console.log(`   Stealth: ${STEALTH_LAUNCH_ARGS.length} launch args, comprehensive page patches`);
-  } catch {
-    console.log(`\n   Chrome: not yet launched (will launch on first session)`);
+    await ensureChromeBinary();
+  } catch (err) {
+    console.error('\n❌ Chrome binary validation failed — server cannot start.');
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
   }
 
-  console.log(`\n   Endpoints:`);
-  console.log(`     POST /api/sessions          — Start bank login session`);
-  console.log(`     GET  /api/sessions/:id/events — SSE event stream`);
-  console.log(`     POST /api/sessions/:id/mfa  — Submit MFA code`);
-  console.log(`     GET  /api/sessions/:id/screenshot — Current page screenshot`);
-  console.log(`     GET  /api/health             — Health check`);
-  console.log(`\n   ⚠️  LOCAL DEVELOPMENT ONLY — never expose to the internet\n`);
-});
+  app.listen(PORT, async () => {
+    console.log(`\n🏦 Conduit Live Testing Server`);
+    console.log(`   http://localhost:${PORT}`);
+    console.log(`\n   Available banks: ${Object.values(BANK_CONFIGS).map((b) => b.name).join(', ')}`);
+
+    // CDT-10: Log the Chrome version at startup for UA mismatch debugging
+    try {
+      const b = await getBrowser();
+      const ua = await b.userAgent();
+      const chromeVersion = extractChromeVersion(ua);
+      console.log(`\n   Chrome version: ${chromeVersion ?? 'unknown'}`);
+      console.log(`   Stealth: ${STEALTH_LAUNCH_ARGS.length} launch args, comprehensive page patches`);
+    } catch {
+      console.log(`\n   Chrome: not yet launched (will launch on first session)`);
+    }
+
+    console.log(`\n   Endpoints:`);
+    console.log(`     POST /api/sessions          — Start bank login session`);
+    console.log(`     GET  /api/sessions/:id/events — SSE event stream`);
+    console.log(`     POST /api/sessions/:id/mfa  — Submit MFA code`);
+    console.log(`     GET  /api/sessions/:id/screenshot — Current page screenshot`);
+    console.log(`     GET  /api/health             — Health check`);
+    console.log(`\n   ⚠️  LOCAL DEVELOPMENT ONLY — never expose to the internet\n`);
+  });
+}
+
+startServer();
 
 // Cleanup on exit
 process.on('SIGINT', async () => {
