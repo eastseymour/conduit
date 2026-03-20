@@ -6,6 +6,7 @@
   "scripts": {
     "start": "tsx server.ts",
     "dev": "tsx watch server.ts",
+    "postinstall": "npx puppeteer browsers install chrome",
     "test:chase": "tsx test-chase-e2e.ts",
     "test": "npx jest --config jest.config.js --forceExit"
   },
