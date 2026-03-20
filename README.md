@@ -43,6 +43,16 @@ Plaid competitor — an Expo SDK that runs an embedded browser to log into banki
 - **Declarative selectors** — Chase account page selectors configured in BankConfig (accountsList, accountItem, name, number, balance, type)
 - **API endpoint** — `GET /api/sessions/:id/accounts` returns extracted AccountInfo[] after successful login
 
+### Browser Anti-Detection Stealth (CDT-10)
+- **Comprehensive fingerprint evasion** — 20 fingerprint surfaces patched to evade bank client-side detection
+- **UA version consistency** — Chrome version extracted from real browser, never hardcoded
+- **Navigator spoofing** — platform, vendor, plugins, mimeTypes, languages, hardwareConcurrency, deviceMemory
+- **WebGL spoofing** — vendor and renderer strings match a real Apple GPU
+- **Canvas noise** — Subtle pixel noise injection to defeat canvas fingerprinting
+- **Screen/window dimensions** — Consistent macOS Retina display profile
+- **CDP artifact removal** — Removes Chrome DevTools Protocol runtime artifacts (`cdc_*` properties)
+- **Iframe propagation** — Stealth patches propagate to dynamically created iframes
+
 ### Visual Browser Preview (CDT-4)
 - **Live browser preview** — Minimized real-time view of the bank browser as navigation happens
 - **Configurable container** — Pixel-based (e.g., 300x200) or percentage-based sizing
@@ -113,6 +123,27 @@ if (authenticated) {
     }
   }
   await adapter.cleanup();
+}
+```
+
+### Transaction Extraction (CDT-14)
+
+```typescript
+import { extractTransactions, chaseAdapter, type TransactionDomContext } from '@conduit/sdk';
+
+// Implement TransactionDomContext for your browser driver
+const ctx: TransactionDomContext = createPuppeteerDomContext(page);
+
+const transactions = await extractTransactions(ctx, chaseAdapter, {
+  accountId: 'chase-checking-001',
+  currency: 'USD',
+  startDate: '2024-01-01',
+  endDate: '2024-01-31',
+  maxPages: 5,
+});
+
+for (const txn of transactions) {
+  console.log(`${txn.date} ${txn.description} ${txn.amount} (${txn.status})`);
 }
 ```
 
@@ -220,7 +251,30 @@ src/
     ├── BankSelector.ts  # Searchable bank list controller
     ├── ConduitPreview.ts # React component factory for preview
     └── preview/  # Visual browser preview (CDT-4): controller, transitions, masking
+
+server/
+├── server.ts              # Express server with Puppeteer bank automation
+├── test-chase-e2e.ts      # Chase login E2E test (CDT-11)
+├── test-chase-e2e.test.ts # Unit tests for E2E script
+└── jest.config.js         # Server Jest config
 ```
+
+### Chase E2E Login Test (CDT-11)
+
+A manual E2E test script that validates the full Chase login flow end-to-end using Puppeteer with stealth patches. It takes timestamped screenshots at every stage and identifies which stage it reached.
+
+```bash
+cd server
+CHASE_USER=myuser CHASE_PASS=mypass npm run test:chase
+```
+
+**Expected flow:**
+```
+init → browser_launched → navigating → login_page_loaded → credentials_filled
+  → submitted → device_verification → mfa_code_entry → mfa_submitted → success
+```
+
+The script runs in headless mode by default. Set `CHASE_E2E_HEADLESS=false` for a visible browser with interactive MFA code entry via terminal prompt.
 
 ### State Machines
 

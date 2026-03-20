@@ -23,6 +23,8 @@ import cors from 'cors';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import puppeteer, { type Browser, type Page, type Frame } from 'puppeteer';
+import { applyStealthToPage, STEALTH_LAUNCH_ARGS, extractChromeVersion } from './stealth';
+import { ensureChromeBinary } from './chrome-validator';
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -181,17 +183,13 @@ async function getBrowser(): Promise<Browser> {
     browser = await puppeteer.launch({
       // `true` = new headless mode (Chrome for Testing) — less detectable than 'shell'
       headless: true,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--window-size=1280,800',
-        '--disable-blink-features=AutomationControlled',
-        '--disable-features=IsolateOrigins,site-per-process',
-        '--disable-web-security',
-      ],
+      args: [...STEALTH_LAUNCH_ARGS],
     });
+
+    // Log the Chrome version for debugging UA mismatches (CDT-10)
+    const ua = await browser.userAgent();
+    const version = extractChromeVersion(ua);
+    console.log(`[stealth] Browser launched — Chrome version: ${version ?? 'unknown'} (from UA: ${ua})`);
   }
   return browser;
 }
@@ -504,39 +502,11 @@ async function runBankSession(
     const page = await b.newPage();
     session.page = page;
 
-    await page.setViewport({ width: 1280, height: 800 });
-
-    // The default UA contains "HeadlessChrome/146..." which banks detect and block.
-    // Replace it with a normal-looking Chrome UA that keeps the real version number
-    // so it passes both UA-string checks and JS API version checks.
-    const realUA = await b.userAgent();
-    const cleanUA = realUA
-      .replace('HeadlessChrome/', 'Chrome/')
-      .replace(/X11; Linux x86_64/, 'Macintosh; Intel Mac OS X 10_15_7');
-    await page.setUserAgent(cleanUA);
-
-    // Anti-detection: remove webdriver flag and patch navigator
-    await page.evaluateOnNewDocument(() => {
-      Object.defineProperty(navigator, 'webdriver', { get: () => false });
-      // Spoof plugins (headless Chrome reports none)
-      Object.defineProperty(navigator, 'plugins', {
-        get: () => [1, 2, 3, 4, 5],
-      });
-      // Spoof languages
-      Object.defineProperty(navigator, 'languages', {
-        get: () => ['en-US', 'en'],
-      });
-      // Patch the Chrome runtime to look like a normal browser
-      // @ts-ignore
-      window.chrome = { runtime: {}, loadTimes: function () {}, csi: function () {} };
-      // Hide automation-related properties
-      const originalQuery = window.navigator.permissions.query;
-      // @ts-ignore
-      window.navigator.permissions.query = (parameters: any) =>
-        parameters.name === 'notifications'
-          ? Promise.resolve({ state: Notification.permission } as PermissionStatus)
-          : originalQuery(parameters);
-    });
+    // CDT-10: Apply comprehensive anti-detection stealth patches.
+    // This sets the UA, viewport, navigator properties, WebGL spoofing,
+    // canvas noise, screen dimensions, and removes CDP artifacts.
+    const cleanUA = await applyStealthToPage(page, b);
+    console.log(`[stealth] Page patched with clean UA: ${cleanUA.substring(0, 80)}...`);
 
     // ── Navigate to login page ──
     session.status = 'navigating';
@@ -2249,18 +2219,43 @@ app.get('*', (_req, res) => {
 
 const PORT = parseInt(process.env.PORT ?? '3001', 10);
 
-app.listen(PORT, () => {
-  console.log(`\n🏦 Conduit Live Testing Server`);
-  console.log(`   http://localhost:${PORT}`);
-  console.log(`\n   Available banks: ${Object.values(BANK_CONFIGS).map((b) => b.name).join(', ')}`);
-  console.log(`\n   Endpoints:`);
-  console.log(`     POST /api/sessions          — Start bank login session`);
-  console.log(`     GET  /api/sessions/:id/events — SSE event stream`);
-  console.log(`     POST /api/sessions/:id/mfa  — Submit MFA code`);
-  console.log(`     GET  /api/sessions/:id/screenshot — Current page screenshot`);
-  console.log(`     GET  /api/health             — Health check`);
-  console.log(`\n   ⚠️  LOCAL DEVELOPMENT ONLY — never expose to the internet\n`);
-});
+async function startServer(): Promise<void> {
+  // CDT-8: Validate Chrome binary before accepting connections
+  try {
+    await ensureChromeBinary();
+  } catch (err) {
+    console.error('\n❌ Chrome binary validation failed — server cannot start.');
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  }
+
+  app.listen(PORT, async () => {
+    console.log(`\n🏦 Conduit Live Testing Server`);
+    console.log(`   http://localhost:${PORT}`);
+    console.log(`\n   Available banks: ${Object.values(BANK_CONFIGS).map((b) => b.name).join(', ')}`);
+
+    // CDT-10: Log the Chrome version at startup for UA mismatch debugging
+    try {
+      const b = await getBrowser();
+      const ua = await b.userAgent();
+      const chromeVersion = extractChromeVersion(ua);
+      console.log(`\n   Chrome version: ${chromeVersion ?? 'unknown'}`);
+      console.log(`   Stealth: ${STEALTH_LAUNCH_ARGS.length} launch args, comprehensive page patches`);
+    } catch {
+      console.log(`\n   Chrome: not yet launched (will launch on first session)`);
+    }
+
+    console.log(`\n   Endpoints:`);
+    console.log(`     POST /api/sessions          — Start bank login session`);
+    console.log(`     GET  /api/sessions/:id/events — SSE event stream`);
+    console.log(`     POST /api/sessions/:id/mfa  — Submit MFA code`);
+    console.log(`     GET  /api/sessions/:id/screenshot — Current page screenshot`);
+    console.log(`     GET  /api/health             — Health check`);
+    console.log(`\n   ⚠️  LOCAL DEVELOPMENT ONLY — never expose to the internet\n`);
+  });
+}
+
+startServer();
 
 // Cleanup on exit
 process.on('SIGINT', async () => {

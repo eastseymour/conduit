@@ -72,6 +72,11 @@ src/
 │   └── index.ts             # UI module barrel exports
 └── index.ts                 # SDK entry point
 
+server/
+├── server.ts                  # Live testing server (Puppeteer + Express)
+├── stealth.ts                 # Anti-detection stealth module (CDT-10)
+└── package.json               # Server-specific dependencies
+
 tests/
 ├── auth/
 │   ├── types.test.ts              # Validation and error type tests
@@ -83,6 +88,8 @@ tests/
 │   ├── registry.test.ts           # Registry registration, lookup, search, conflict detection
 │   ├── types.test.ts              # Adapter type construction and validation
 │   └── validation.test.ts         # Config validation: selectors, extractors, MFA rules
+├── server/
+│   └── stealth.test.ts           # Stealth module: UA building, version extraction, script generation (57 tests)
 ├── ui/
 │   ├── BankSelector.test.ts       # Bank selector controller: search, filter, selection state
 │   ├── ConduitPreview.test.ts     # ConduitPreview component factory tests
@@ -101,6 +108,14 @@ tests/
 ├── MessageBridge.test.ts          # Bridge communication tests
 ├── BrowserEngine.test.ts          # Engine integration tests (mock WebView)
 └── CookieManager.test.ts          # Cookie storage and persistence tests
+
+server/
+├── server.ts                      # Express server with Puppeteer bank automation
+├── test-chase-e2e.ts              # Chase login E2E test script (CDT-11)
+├── test-chase-e2e.test.ts         # Unit tests for the E2E script
+├── jest.config.js                 # Server-specific Jest config (ts-jest, diagnostics off)
+├── package.json                   # Server dependencies (express, puppeteer, tsx)
+└── screenshots/                   # (gitignored) Timestamped E2E screenshots
 ```
 
 ## Key Patterns
@@ -223,12 +238,94 @@ The `BrowserEngine` emits events for:
 - `console` — forwarded console.log/warn/error from the WebView
 - `error` — page errors and unhandled exceptions from the WebView
 
+### Browser Anti-Detection Stealth (CDT-10)
+
+The `server/stealth.ts` module provides comprehensive fingerprint evasion for headless Puppeteer:
+
+- **`applyStealthToPage(page, browser, config?)`** — applies all stealth patches to a page before navigation
+- **`buildCleanUserAgent(headlessUA, config?)`** — strips `HeadlessChrome` and fakes macOS platform
+- **`extractChromeVersion(ua)`** — extracts the real Chrome version from Puppeteer's UA
+- **`buildStealthScript(config?)`** — generates the in-browser JS that patches all detectable surfaces
+- **`STEALTH_LAUNCH_ARGS`** — Chrome launch arguments optimized for stealth
+- **`DEFAULT_STEALTH_CONFIG`** — sensible defaults for a macOS Chrome profile
+
+**20 fingerprint surfaces patched:**
+1. User-Agent string (HeadlessChrome → Chrome, Linux → macOS)
+2. `navigator.webdriver` → false
+3. `navigator.platform` → 'MacIntel' (consistent with UA)
+4. `navigator.vendor` → 'Google Inc.'
+5. `navigator.plugins` → realistic Chrome PDF/NaCl plugins
+6. `navigator.mimeTypes` → matches plugins
+7. `navigator.languages` → ['en-US', 'en']
+8. `navigator.hardwareConcurrency` → 8
+9. `navigator.deviceMemory` → 8 GB
+10. `navigator.maxTouchPoints` → 0 (desktop)
+11. `window.chrome` → comprehensive runtime/app/csi/loadTimes
+12. `navigator.permissions.query` → correct notifications response
+13. WebGL vendor/renderer → Apple M1 Pro (ANGLE)
+14. Canvas fingerprint → subtle noise injection on toDataURL/toBlob
+15. `window.outerWidth/outerHeight` → match screen dimensions
+16. `screen.*` properties → realistic 1440×900 Retina display
+17. `window.devicePixelRatio` → 2 (Retina)
+18. CDP runtime artifacts → `cdc_*` properties removed
+19. iframe stealth propagation → patches contentWindow on new iframes
+20. `navigator.connection` → 4g/50ms RTT
+
+**Key invariant:** The Chrome version in the UA is always extracted from the real browser, never hardcoded. This prevents version mismatch detection (e.g., UA says Chrome 131 but JS APIs report 146).
+
 ## SDK Distribution
 
 The package is configured for SDK distribution:
 - `main`: `dist/index.js` — CommonJS entry point
 - `types`: `dist/index.d.ts` — TypeScript declarations
 - `peerDependencies`: `react`, `react-native`, `react-native-webview`, `expo` (optional)
+
+## Live Server (`server/`)
+
+The `server/` directory contains a local Puppeteer-based backend for live bank testing.
+
+### Commands (from `server/`)
+
+```bash
+npm install           # Install dependencies (auto-installs Chrome)
+npm start             # Start the Express server (tsx server.ts)
+npm run dev           # Start in watch mode
+npm test              # Run server unit tests (Jest)
+npm run test:chase    # Run the Chase E2E login test (requires credentials)
+```
+
+### Chase E2E Test (`server/test-chase-e2e.ts`)
+
+Manual E2E test script that validates the Chase login flow with screenshots at each step.
+
+**Expected flow:** `init → browser_launched → navigating → login_page_loaded → credentials_filled → submitted → device_verification → mfa_code_entry → mfa_submitted → success`
+
+**Environment variables:**
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `CHASE_USER` | Yes | — | Chase username |
+| `CHASE_PASS` | Yes | — | Chase password |
+| `CHASE_E2E_HEADLESS` | No | `true` | Run browser headless (`true`/`false`) |
+| `CHASE_E2E_TIMEOUT` | No | `45000` | Navigation timeout in ms |
+| `CHASE_E2E_SCREENSHOT_DIR` | No | `./screenshots` | Directory for timestamped screenshots |
+
+**Usage:**
+```bash
+cd server
+CHASE_USER=myuser CHASE_PASS=mypass npm run test:chase
+# Or for visible browser:
+CHASE_USER=myuser CHASE_PASS=mypass CHASE_E2E_HEADLESS=false npm run test:chase
+```
+
+**Key features:**
+- Mirrors all stealth patches from `server.ts` (UA cleaning, navigator.webdriver, plugins, chrome runtime)
+- Multi-strategy form detection: known selectors → iframe probe → shadow DOM → deep DOM probe
+- Outcome detection: success, MFA code entry, device verification, error (via CSS selectors + text pattern matching)
+- Timestamped screenshots at every stage transition
+- Interactive TTY mode for MFA code entry (when running non-headless)
+- Prints summary report with PASS/STOPPED result and stage log
+
+**Exports (for unit testing):** `CHASE_SELECTORS`, `CHASE_LOGIN_URL`, `STAGE_ORDER`, `buildConfig`, `applyStealthPatches`, `probeForLoginForm`, `detectOutcome`, `extractMfaMethods`, `extractErrorText`, `takeScreenshot`, `runChaseE2E`, `printReport`
 
 ## Environment Variables
 
@@ -288,3 +385,10 @@ None required for the SDK itself. Browser driver implementations may need enviro
 33. `parseMaskingResult()` never throws — always returns a valid `SensitiveFieldMaskResult`
 34. `BrowserPreviewConfig` validation requires: width/height > 0, blurRadius ≥ 0, transitionDuration ≥ 0, at least one field rule
 35. Events are emitted synchronously — listeners execute in registration order
+
+### Browser Stealth (CDT-10)
+36. UA Chrome version always matches Puppeteer's actual Chrome version — never hardcoded
+37. `navigator.platform` must be consistent with the OS string in the UA
+38. WebGL vendor/renderer strings must correspond to a real GPU on the spoofed platform
+39. All stealth patches run via `evaluateOnNewDocument` — before any bank JS executes
+40. Stealth script is wrapped in IIFE and uses strict mode — no global scope pollution
