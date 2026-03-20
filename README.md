@@ -34,6 +34,16 @@ Plaid competitor — an Expo SDK that runs an embedded browser to log into banki
 - **MFA detection** — URL patterns and CSS selectors to identify MFA challenge types
 - **Bank selector UI** — Headless, searchable bank list controller (framework-agnostic)
 
+### Browser Anti-Detection Stealth (CDT-10)
+- **Comprehensive fingerprint evasion** — 20 fingerprint surfaces patched to evade bank client-side detection
+- **UA version consistency** — Chrome version extracted from real browser, never hardcoded
+- **Navigator spoofing** — platform, vendor, plugins, mimeTypes, languages, hardwareConcurrency, deviceMemory
+- **WebGL spoofing** — vendor and renderer strings match a real Apple GPU
+- **Canvas noise** — Subtle pixel noise injection to defeat canvas fingerprinting
+- **Screen/window dimensions** — Consistent macOS Retina display profile
+- **CDP artifact removal** — Removes Chrome DevTools Protocol runtime artifacts (`cdc_*` properties)
+- **Iframe propagation** — Stealth patches propagate to dynamically created iframes
+
 ### Visual Browser Preview (CDT-4)
 - **Live browser preview** — Minimized real-time view of the bank browser as navigation happens
 - **Configurable container** — Pixel-based (e.g., 300x200) or percentage-based sizing
